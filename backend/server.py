@@ -9,10 +9,10 @@ import os
 import logging
 import uuid
 import threading
-from typing import Optional
+from typing import Optional, Annotated
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -36,14 +36,14 @@ EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "local")
 DENSE_MODEL_NAME = os.getenv("DENSE_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 USE_NOMIC_PREFIX = os.getenv("USE_NOMIC_PREFIX", "false").lower() == "true"
 
-# Global instances
+# Global checks for startup/shutdown only - not for direct use
 _qdrant_client: Optional[QdrantClient] = None
 _dense_model: Optional[TextEmbedding] = None
 _bm25_model: Optional[SparseTextEmbedding] = None
 
 
-def get_qdrant_client() -> QdrantClient:
-    """Get or create Qdrant client."""
+async def get_qdrant_client() -> QdrantClient:
+    """Dependency for getting Qdrant client."""
     global _qdrant_client
     if _qdrant_client is None:
         logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
@@ -51,8 +51,8 @@ def get_qdrant_client() -> QdrantClient:
     return _qdrant_client
 
 
-def get_dense_model() -> TextEmbedding:
-    """Get or create dense embedding model."""
+async def get_dense_model() -> TextEmbedding:
+    """Dependency for getting dense embedding model."""
     global _dense_model
     if _dense_model is None:
         logger.info(f"Loading embedding model ({DENSE_MODEL_NAME})...")
@@ -60,8 +60,8 @@ def get_dense_model() -> TextEmbedding:
     return _dense_model
 
 
-def get_bm25_model() -> SparseTextEmbedding:
-    """Get or create BM25 sparse embedding model."""
+async def get_bm25_model() -> SparseTextEmbedding:
+    """Dependency for getting BM25 sparse embedding model."""
     global _bm25_model
     if _bm25_model is None:
         logger.info("Loading Qdrant BM25 model...")
@@ -160,9 +160,10 @@ async def lifespan(app: FastAPI):
     """Lifespan handler for startup/shutdown."""
     # Startup: preload models and ensure collection
     logger.info("Preloading models...")
-    get_dense_model()
-    get_bm25_model()
-    await ensure_collection(get_qdrant_client())
+    await get_dense_model()
+    await get_bm25_model()
+    client = await get_qdrant_client()
+    await ensure_collection(client)
     logger.info("Models loaded.")
     yield
     # Shutdown
@@ -182,10 +183,11 @@ app = FastAPI(
 # ============================================================
 
 @app.get("/api/status")
-async def get_status() -> ConnectionStatus:
+async def get_status(
+    client: Annotated[QdrantClient, Depends(get_qdrant_client)]
+) -> ConnectionStatus:
     """Check connection status to Qdrant."""
     try:
-        client = get_qdrant_client()
         collection_info = client.get_collection(COLLECTION_NAME)
         return ConnectionStatus(
             connected=True,
@@ -212,7 +214,8 @@ async def get_status() -> ConnectionStatus:
 async def upload_document(
     file: UploadFile = File(...),
     library: str = Form(...),
-    version: str = Form(default="latest")
+    version: str = Form(default="latest"),
+    client: QdrantClient = Depends(get_qdrant_client)
 ) -> UploadResult:
     """
     Upload a document file to be indexed.
@@ -220,7 +223,6 @@ async def upload_document(
     Supports: Markdown (.md), HTML (.html/.htm), Text (.txt), PDF (.pdf), ZIP (archives)
     """
     try:
-        client = get_qdrant_client()
         content = await file.read()
         
         result = await ingest_document(
@@ -249,11 +251,11 @@ async def upload_document(
 async def upload_multiple_documents(
     files: list[UploadFile] = File(...),
     library: str = Form(...),
-    version: str = Form(default="latest")
+    version: str = Form(default="latest"),
+    client: QdrantClient = Depends(get_qdrant_client)
 ) -> UploadResult:
     """Upload multiple document files to be indexed."""
     try:
-        client = get_qdrant_client()
         total_files = 0
         total_chunks = 0
         
@@ -294,7 +296,11 @@ def _process_upload_background(task_id: str, content: bytes, filename: str, libr
             _upload_tasks[task_id]["status"] = "processing"
             _upload_tasks[task_id]["progress"] = "Converting document..."
             
-            client = get_qdrant_client()
+            # Note: Background tasks need their own client instance or thread-safe handling
+            # Ideally we pass a factory or handle this better, but for now we re-instantiate or use global if safe
+            # Since get_qdrant_client is now async and uses global, we might need a sync wrapper or use sync client for thread
+            # For simplicity in this refactor, we'll create a new client for the thread
+            client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
             result = loop.run_until_complete(ingest_document(
                 client=client,
                 content=content,
@@ -379,11 +385,13 @@ async def get_upload_status(task_id: str) -> UploadStatus:
 
 
 @app.delete("/api/library/{library}")
-
-async def remove_library(library: str, version: Optional[str] = None) -> DeleteResult:
+async def remove_library(
+    library: str, 
+    version: Optional[str] = None,
+    client: QdrantClient = Depends(get_qdrant_client)
+) -> DeleteResult:
     """Delete a library (and optionally specific version) from the index."""
     try:
-        client = get_qdrant_client()
         deleted_count = await delete_library(client, library, version)
         
         return DeleteResult(
@@ -403,9 +411,10 @@ async def remove_library(library: str, version: Optional[str] = None) -> DeleteR
 # ============================================================
 
 @app.get("/api/libraries")
-async def list_libraries() -> list[LibraryInfo]:
+async def list_libraries(
+    client: QdrantClient = Depends(get_qdrant_client)
+) -> list[LibraryInfo]:
     """List all indexed libraries and their versions."""
-    client = get_qdrant_client()
     
     try:
         # Get all unique libraries using facet API
@@ -448,11 +457,13 @@ async def list_libraries() -> list[LibraryInfo]:
 
 
 @app.post("/api/search")
-async def search_docs(request: SearchRequest) -> list[SearchResult]:
+async def search_docs(
+    request: SearchRequest,
+    client: QdrantClient = Depends(get_qdrant_client),
+    bm25_model: SparseTextEmbedding = Depends(get_bm25_model),
+    dense_model: TextEmbedding = Depends(get_dense_model)
+) -> list[SearchResult]:
     """Search documentation using hybrid semantic + keyword search."""
-    client = get_qdrant_client()
-    bm25_model = get_bm25_model()
-    dense_model = get_dense_model()
     
     # Apply Nomic prefix if needed
     query_for_embed = f"search_query: {request.query}" if USE_NOMIC_PREFIX else request.query
@@ -530,9 +541,11 @@ async def search_docs(request: SearchRequest) -> list[SearchResult]:
 
 
 @app.post("/api/resolve")
-async def resolve_library(request: ResolveRequest) -> list[ResolveResult]:
+async def resolve_library(
+    request: ResolveRequest,
+    client: QdrantClient = Depends(get_qdrant_client)
+) -> list[ResolveResult]:
     """Find libraries matching a search query."""
-    client = get_qdrant_client()
     query_lower = request.query.lower()
     
     try:
@@ -604,9 +617,11 @@ async def resolve_library(request: ResolveRequest) -> list[ResolveResult]:
 
 
 @app.get("/api/document")
-async def get_document(file_path: str) -> DocumentResult:
+async def get_document(
+    file_path: str,
+    client: QdrantClient = Depends(get_qdrant_client)
+) -> DocumentResult:
     """Get the full content of a specific document by its file path."""
-    client = get_qdrant_client()
     
     try:
         results, _ = client.scroll(
