@@ -7,6 +7,8 @@ Extends DRUID's dashboard pattern with document upload capabilities.
 
 import os
 import logging
+import uuid
+import threading
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -129,11 +131,28 @@ class UploadResult(BaseModel):
     message: str
 
 
+class AsyncUploadStarted(BaseModel):
+    task_id: str
+    message: str
+
+
+class UploadStatus(BaseModel):
+    task_id: str
+    status: str  # "pending", "processing", "completed", "failed"
+    progress: Optional[str] = None
+    result: Optional[UploadResult] = None
+    error: Optional[str] = None
+
+
 class DeleteResult(BaseModel):
     success: bool
     library: str
     version: Optional[str]
     chunks_deleted: int
+
+
+# In-memory task storage for background uploads
+_upload_tasks: dict[str, dict] = {}
 
 
 @asynccontextmanager
@@ -264,7 +283,103 @@ async def upload_multiple_documents(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _process_upload_background(task_id: str, content: bytes, filename: str, library: str, version: str):
+    """Background worker for processing uploads (runs in separate thread)."""
+    import asyncio
+    
+    def run_async():
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            _upload_tasks[task_id]["status"] = "processing"
+            _upload_tasks[task_id]["progress"] = "Converting document..."
+            
+            client = get_qdrant_client()
+            result = loop.run_until_complete(ingest_document(
+                client=client,
+                content=content,
+                filename=filename,
+                library=library,
+                version=version
+            ))
+            
+            _upload_tasks[task_id]["status"] = "completed"
+            _upload_tasks[task_id]["progress"] = "Complete"
+            _upload_tasks[task_id]["result"] = UploadResult(
+                success=True,
+                library=result["library"],
+                version=result["version"],
+                files_processed=result["files_processed"],
+                chunks_indexed=result["chunks_indexed"],
+                message=f"Successfully indexed {result['chunks_indexed']} chunks"
+            )
+        except Exception as e:
+            logger.error(f"Background upload failed: {e}")
+            _upload_tasks[task_id]["status"] = "failed"
+            _upload_tasks[task_id]["error"] = str(e)
+        finally:
+            loop.close()
+    
+    run_async()
+
+
+@app.post("/api/upload/async")
+async def upload_document_async(
+    file: UploadFile = File(...),
+    library: str = Form(...),
+    version: str = Form(default="latest")
+) -> AsyncUploadStarted:
+    """
+    Upload a document for async processing.
+    
+    Use this for large PDFs which may take a while to process.
+    Returns a task_id to poll for status.
+    """
+    content = await file.read()
+    task_id = str(uuid.uuid4())
+    
+    # Initialize task
+    _upload_tasks[task_id] = {
+        "status": "pending",
+        "progress": "Queued for processing",
+        "filename": file.filename,
+        "library": library,
+        "version": version,
+        "result": None,
+        "error": None
+    }
+    
+    # Start background thread
+    thread = threading.Thread(
+        target=_process_upload_background,
+        args=(task_id, content, file.filename, library, version)
+    )
+    thread.start()
+    
+    return AsyncUploadStarted(
+        task_id=task_id,
+        message=f"Upload queued. PDF files may take a while to process. You can close this page."
+    )
+
+
+@app.get("/api/upload/status/{task_id}")
+async def get_upload_status(task_id: str) -> UploadStatus:
+    """Get the status of an async upload task."""
+    if task_id not in _upload_tasks:
+        raise HTTPException(status_code=404, detail="Task not found")
+    
+    task = _upload_tasks[task_id]
+    return UploadStatus(
+        task_id=task_id,
+        status=task["status"],
+        progress=task.get("progress"),
+        result=task.get("result"),
+        error=task.get("error")
+    )
+
+
 @app.delete("/api/library/{library}")
+
 async def remove_library(library: str, version: Optional[str] = None) -> DeleteResult:
     """Delete a library (and optionally specific version) from the index."""
     try:

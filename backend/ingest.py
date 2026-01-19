@@ -17,7 +17,7 @@ import yaml
 
 from markdownify import markdownify as md
 from bs4 import BeautifulSoup
-from PyPDF2 import PdfReader
+from docling.document_converter import DocumentConverter
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from fastembed import TextEmbedding, SparseTextEmbedding
@@ -139,17 +139,26 @@ def convert_html_to_markdown(html_content: str) -> str:
 
 
 def extract_pdf_text(pdf_content: bytes) -> str:
-    """Extract text from PDF file."""
+    """Extract text from PDF file using Docling for layout preservation."""
+    import tempfile
     try:
-        reader = PdfReader(io.BytesIO(pdf_content))
-        text_parts = []
-        for page in reader.pages:
-            text = page.extract_text()
-            if text:
-                text_parts.append(text)
-        return '\n\n'.join(text_parts)
+        # Write PDF to temp file (Docling requires file path)
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+            tmp.write(pdf_content)
+            tmp_path = tmp.name
+        
+        logger.info("Converting PDF with Docling (this may take a while)...")
+        converter = DocumentConverter()
+        result = converter.convert(tmp_path)
+        markdown = result.document.export_to_markdown()
+        
+        # Clean up temp file
+        os.remove(tmp_path)
+        
+        logger.info(f"PDF conversion complete: {len(markdown)} chars")
+        return markdown
     except Exception as e:
-        logger.error(f"Error extracting PDF: {e}")
+        logger.error(f"Error extracting PDF with Docling: {e}")
         return ""
 
 

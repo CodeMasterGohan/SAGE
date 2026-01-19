@@ -5,7 +5,7 @@ services:
     ports:
       - "6334:6333"
     volumes:
-      - ./qdrant_storage:/qdrant/storage
+      - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
   backend:
@@ -47,3 +47,6 @@ services:
       - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
       - USE_NOMIC_PREFIX=false
     restart: unless-stopped
+
+volumes:
+  qdrant_data:

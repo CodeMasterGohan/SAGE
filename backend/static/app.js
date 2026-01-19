@@ -155,7 +155,10 @@ async function handleFileUpload(files) {
     let totalChunks = 0;
 
     for (const file of files) {
-        uploadFileName.textContent = `Uploading ${file.name}...`;
+        const isPDF = file.name.toLowerCase().endsWith('.pdf');
+        uploadFileName.textContent = isPDF
+            ? `Processing ${file.name} (this may take a while)...`
+            : `Uploading ${file.name}...`;
         uploadPercent.textContent = `${Math.round((processed / totalFiles) * 100)}%`;
         uploadProgressBar.style.width = `${(processed / totalFiles) * 100}%`;
 
@@ -165,17 +168,53 @@ async function handleFileUpload(files) {
             formData.append('library', library);
             formData.append('version', version);
 
-            const response = await fetch('/api/upload', {
-                method: 'POST',
-                body: formData
-            });
+            if (isPDF) {
+                // Use async endpoint for PDFs
+                const asyncResponse = await fetch('/api/upload/async', {
+                    method: 'POST',
+                    body: formData
+                });
+                const asyncResult = await asyncResponse.json();
 
-            const result = await response.json();
+                if (asyncResponse.ok) {
+                    // Poll for status
+                    const taskId = asyncResult.task_id;
+                    let status = 'pending';
 
-            if (response.ok) {
-                totalChunks += result.chunks_indexed;
+                    while (status === 'pending' || status === 'processing') {
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+
+                        const statusResponse = await fetch(`/api/upload/status/${taskId}`);
+                        const statusData = await statusResponse.json();
+                        status = statusData.status;
+
+                        if (statusData.progress) {
+                            uploadFileName.textContent = `${file.name}: ${statusData.progress}`;
+                        }
+
+                        if (status === 'completed' && statusData.result) {
+                            totalChunks += statusData.result.chunks_indexed;
+                        } else if (status === 'failed') {
+                            console.error('Upload failed:', statusData.error);
+                        }
+                    }
+                } else {
+                    console.error('Async upload failed:', asyncResult);
+                }
             } else {
-                console.error('Upload failed:', result);
+                // Use regular sync endpoint for non-PDFs
+                const response = await fetch('/api/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    totalChunks += result.chunks_indexed;
+                } else {
+                    console.error('Upload failed:', result);
+                }
             }
         } catch (error) {
             console.error('Upload error:', error);
