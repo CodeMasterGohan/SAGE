@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html class="dark" lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>SAGE-Docs - Search Dashboard</title>
+    <!-- Tailwind CSS v3 with Plugins -->
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <!-- FontAwesome for Icons -->
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet" />
+    <!-- Google Fonts: Inter -->
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet" />
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        sage: {
+                            bg: '#0b0c10',
+                            panel: '#151921',
+                            border: '#27272a',
+                            accent: '#00f0ff',
+                            accentDark: '#004d52',
+                            textMain: '#c9d1d9',
+                            textMuted: '#94a3b8',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <link rel="stylesheet" href="/static/styles.css" />
+</head>
+
+<body
+    class="bg-sage-bg text-sage-textMain font-sans h-screen overflow-hidden flex selection:bg-sage-accent selection:text-black">
+
+    <!-- Sidebar -->
+    <aside class="w-[280px] h-full flex flex-col border-r border-sage-border bg-sage-bg shrink-0 z-20">
+        <!-- Sidebar Header -->
+        <div class="h-16 flex items-center px-6 gap-3 border-b border-transparent">
+            <div
+                class="w-8 h-8 rounded bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-[0_0_15px_rgba(0,240,255,0.5)]">
+                <i class="fa-solid fa-scroll text-white text-sm"></i>
+            </div>
+            <span class="font-bold tracking-tight text-lg">SAGE-Docs</span>
+        </div>
+
+        <!-- Tabs -->
+        <div class="px-4 py-3 border-b border-sage-border">
+            <div class="flex gap-2">
+                <button id="tabSearch"
+                    class="tab-btn active flex-1 px-3 py-2 text-xs font-medium rounded border border-transparent"
+                    onclick="switchTab('search')">
+                    <i class="fa-solid fa-search mr-1"></i> Search
+                </button>
+                <button id="tabUpload"
+                    class="tab-btn flex-1 px-3 py-2 text-xs font-medium rounded border border-transparent text-gray-400"
+                    onclick="switchTab('upload')">
+                    <i class="fa-solid fa-upload mr-1"></i> Upload
+                </button>
+            </div>
+        </div>
+
+        <!-- Filter Input -->
+        <div class="px-4 py-4">
+            <div class="relative">
+                <i class="fa-solid fa-filter absolute left-3 top-2.5 text-gray-500 text-xs"></i>
+                <input id="libraryFilter"
+                    class="w-full bg-[#1C212B] border border-gray-800 rounded-md py-1.5 pl-8 pr-3 text-sm focus:outline-none focus:border-sage-accent focus:ring-1 focus:ring-sage-accent transition-colors text-gray-300 placeholder-gray-600/50"
+                    placeholder="Filter libraries..." type="text" />
+            </div>
+        </div>
+
+        <!-- Navigation -->
+        <nav class="flex-1 overflow-y-auto px-2 py-2 space-y-6">
+            <!-- Libraries Section -->
+            <div>
+                <h3 class="px-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Libraries</h3>
+                <ul id="libraryList" class="space-y-0.5">
+                    <!-- Libraries loaded dynamically -->
+                    <li class="px-4 py-2 text-sm text-gray-500">
+                        <i class="fa-solid fa-spinner fa-spin mr-2"></i> Loading...
+                    </li>
+                </ul>
+            </div>
+
+            <!-- Quick Links -->
+            <div>
+                <h3 class="px-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Quick Links</h3>
+                <ul class="space-y-0.5">
+                    <li>
+                        <a class="flex items-center gap-3 px-4 py-2 text-sm text-sage-textMuted hover:bg-[#1C212B] hover:text-white rounded-md transition-colors"
+                            href="#" onclick="showAllLibraries()">
+                            <i class="fa-solid fa-layer-group w-4 text-center"></i>
+                            <span>All Libraries</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a class="flex items-center gap-3 px-4 py-2 text-sm text-sage-textMuted hover:bg-[#1C212B] hover:text-white rounded-md transition-colors"
+                            href="#" onclick="clearSearch()">
+                            <i class="fa-solid fa-eraser w-4 text-center"></i>
+                            <span>Clear Search</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </nav>
+
+        <!-- Sidebar Footer -->
+        <div class="p-4 border-t border-sage-border">
+            <div class="flex items-center gap-3">
+                <div
+                    class="w-9 h-9 bg-gradient-to-br from-cyan-500 to-blue-600 rounded flex items-center justify-center font-bold text-xs text-white shadow-lg">
+                    <i class="fa-solid fa-database"></i>
+                </div>
+                <div class="flex flex-col">
+                    <span class="text-sm font-medium text-white">Qdrant Vector DB</span>
+                    <div class="flex items-center gap-1.5">
+                        <span id="docCount" class="text-[10px] text-gray-400">-- docs</span>
+                        <span class="w-0.5 h-0.5 bg-gray-500 rounded-full"></span>
+                        <span id="connectionStatus" class="text-[10px] text-yellow-400">Connecting...</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="flex-1 h-full overflow-y-auto relative bg-sage-bg">
+        <!-- Top Bar -->
+        <header class="flex items-center justify-between px-8 py-5">
+            <!-- Breadcrumbs -->
+            <div class="flex items-center text-sm text-gray-500 gap-2">
+                <span class="hover:text-gray-300 cursor-pointer">SAGE-Docs</span>
+                <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                <span class="hover:text-gray-300 cursor-pointer">Documentation</span>
+                <i class="fa-solid fa-chevron-right text-[10px]"></i>
+                <span id="breadcrumbCurrent" class="text-white font-medium">Search</span>
+            </div>
+
+            <!-- Connection Status Badge -->
+            <div class="flex items-center gap-4">
+                <div id="connectionBadge"
+                    class="flex items-center gap-2 px-3 py-1 rounded-full border border-yellow-500/30 bg-yellow-950/20">
+                    <span class="relative flex h-2 w-2">
+                        <span id="connectionPing"
+                            class="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+                        <span id="connectionDot" class="relative inline-flex rounded-full h-2 w-2 bg-yellow-500"></span>
+                    </span>
+                    <span id="connectionText"
+                        class="text-[10px] font-bold tracking-wider text-yellow-400 uppercase">Connecting</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Search View -->
+        <div id="searchView" class="max-w-6xl mx-auto px-8 pb-20">
+            <!-- Hero Title -->
+            <div class="text-center mb-8">
+                <h1 class="text-5xl font-bold tracking-tight mb-2">
+                    Search <span
+                        class="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500">SAGE-Docs</span>
+                </h1>
+                <p class="text-gray-500 text-sm">Smart Accessible Gateway for Enterprise Documentation</p>
+            </div>
+
+            <!-- Search Box -->
+            <div class="relative max-w-3xl mx-auto z-10 mb-16">
+                <div
+                    class="bg-[#161b22] border rounded-xl shadow-[0_20px_60px_-15px_rgba(0,0,0,0.8)] overflow-hidden border-[#30363d] shadow-2xl shadow-black/50">
+                    <!-- Input Row -->
+                    <div class="flex items-center px-4 py-4 border-b border-gray-800">
+                        <i class="fa-solid fa-magnifying-glass text-cyan-400 text-lg ml-2 mr-4"></i>
+                        <input id="searchInput" autofocus
+                            class="bg-transparent border-none w-full text-lg text-white focus:ring-0 placeholder-gray-600 caret-cyan-400"
+                            type="text" placeholder="Search documentation..." />
+                        <div class="flex items-center gap-2">
+                            <select id="fusionMethod"
+                                class="text-[10px] font-medium text-gray-400 bg-gray-800 px-2 py-0.5 rounded hover:bg-gray-700 border border-gray-600 transition-colors cursor-pointer">
+                                <option value="dbsf">DBSF</option>
+                                <option value="rrf">RRF</option>
+                            </select>
+                            <kbd
+                                class="text-[10px] font-mono text-gray-500 bg-gray-900 border border-gray-700 px-1.5 py-0.5 rounded shadow-sm">↵</kbd>
+                        </div>
+                    </div>
+
+                    <!-- Search Suggestions -->
+                    <div id="searchSuggestions" class="px-2 pt-3 pb-3 hidden">
+                        <h4 class="px-4 text-[10px] font-bold text-gray-500 uppercase tracking-widest mb-2">Suggestions
+                        </h4>
+                        <ul id="suggestionList">
+                            <!-- Suggestions loaded dynamically -->
+                        </ul>
+                    </div>
+
+                    <!-- Active Library Filter -->
+                    <div id="activeFilterSection" class="px-4 py-3 border-t border-gray-800/50 hidden">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] text-gray-500 uppercase">Filtered to:</span>
+                            <span id="activeFilterBadge"
+                                class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-cyan-950 text-cyan-400 border border-cyan-800 rounded text-xs">
+                                <span id="activeFilterName">react</span>
+                                <button onclick="clearLibraryFilter()" class="hover:text-cyan-200">
+                                    <i class="fa-solid fa-xmark"></i>
+                                </button>
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Header -->
+            <div id="resultsHeader"
+                class="flex items-center justify-between text-xs text-gray-500 mb-4 font-mono max-w-5xl mx-auto hidden">
+                <span>SEARCH RESULTS</span>
+                <span id="resultCount">0 matches</span>
+            </div>
+
+            <!-- Results Grid -->
+            <div id="resultsGrid" class="max-w-5xl mx-auto space-y-6">
+                <!-- Results loaded dynamically -->
+            </div>
+
+            <!-- Empty State -->
+            <div id="emptyState" class="max-w-5xl mx-auto text-center py-16">
+                <div
+                    class="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-gray-800 to-gray-900 flex items-center justify-center">
+                    <i class="fa-solid fa-magnifying-glass text-4xl text-gray-600"></i>
+                </div>
+                <h3 class="text-xl font-semibold text-gray-300 mb-2">Start searching</h3>
+                <p class="text-gray-500 max-w-md mx-auto">
+                    Enter a search query above to find documentation. Try something like "useState hook" or "async
+                    await".
+                </p>
+            </div>
+
+            <!-- Loading State -->
+            <div id="loadingState" class="max-w-5xl mx-auto text-center py-16 hidden">
+                <div
+                    class="w-24 h-24 mx-auto mb-6 rounded-full bg-gradient-to-br from-cyan-900/30 to-blue-900/30 flex items-center justify-center">
+                    <i class="fa-solid fa-spinner fa-spin text-4xl text-cyan-400"></i>
+                </div>
+                <h3 class="text-xl font-semibold text-gray-300 mb-2">Searching...</h3>
+                <p class="text-gray-500">Finding the most relevant documentation</p>
+            </div>
+        </div>
+
+        <!-- Upload View (hidden by default) -->
+        <div id="uploadView" class="max-w-4xl mx-auto px-8 pb-20 hidden">
+            <!-- Hero Title -->
+            <div class="text-center mb-8">
+                <h1 class="text-4xl font-bold tracking-tight mb-2">
+                    Upload <span
+                        class="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500">Documentation</span>
+                </h1>
+                <p class="text-gray-500 text-sm">Add your documentation files to be indexed and searchable</p>
+            </div>
+
+            <!-- Upload Card -->
+            <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6 mb-8">
+                <!-- Library/Version Inputs -->
+                <div class="grid grid-cols-2 gap-4 mb-6">
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-2">Library Name *</label>
+                        <input id="uploadLibrary" type="text" placeholder="e.g., react, python-requests"
+                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" />
+                    </div>
+                    <div>
+                        <label class="block text-xs font-medium text-gray-400 mb-2">Version</label>
+                        <input id="uploadVersion" type="text" placeholder="e.g., 18.2, latest" value="latest"
+                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" />
+                    </div>
+                </div>
+
+                <!-- Drop Zone -->
+                <div id="dropZone" class="upload-zone rounded-xl p-12 text-center cursor-pointer"
+                    onclick="document.getElementById('fileInput').click()">
+                    <input id="fileInput" type="file" multiple accept=".md,.markdown,.html,.htm,.txt,.pdf,.zip"
+                        class="hidden" />
+                    <div
+                        class="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-cyan-900/30 to-blue-900/30 flex items-center justify-center">
+                        <i class="fa-solid fa-cloud-arrow-up text-4xl text-cyan-400"></i>
+                    </div>
+                    <h3 class="text-lg font-semibold text-gray-300 mb-2">Drop files here or click to browse</h3>
+                    <p class="text-gray-500 text-sm mb-4">Supports Markdown, HTML, Text, PDF, and ZIP archives</p>
+                    <div class="flex justify-center gap-2 flex-wrap">
+                        <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.md</span>
+                        <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.html</span>
+                        <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.txt</span>
+                        <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.pdf</span>
+                        <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.zip</span>
+                    </div>
+                </div>
+
+                <!-- Upload Progress -->
+                <div id="uploadProgress" class="mt-6 hidden">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-sm text-gray-300" id="uploadFileName">Uploading...</span>
+                        <span class="text-xs text-cyan-400" id="uploadPercent">0%</span>
+                    </div>
+                    <div class="upload-progress">
+                        <div class="upload-progress-bar" id="uploadProgressBar" style="width: 0%"></div>
+                    </div>
+                </div>
+
+                <!-- Upload Result -->
+                <div id="uploadResult" class="mt-6 hidden">
+                    <div class="p-4 rounded-lg bg-green-900/20 border border-green-800">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-check-circle text-green-400 text-xl"></i>
+                            <div>
+                                <p class="text-green-400 font-medium" id="uploadResultTitle">Upload successful!</p>
+                                <p class="text-green-300/70 text-sm" id="uploadResultMessage"></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Manage Libraries -->
+            <div class="bg-[#161b22] border border-[#30363d] rounded-xl p-6">
+                <h2 class="text-lg font-semibold text-white mb-4">
+                    <i class="fa-solid fa-folder-tree mr-2 text-cyan-400"></i> Manage Libraries
+                </h2>
+                <div id="libraryManager" class="space-y-2">
+                    <!-- Libraries loaded dynamically -->
+                    <p class="text-gray-500 text-sm">Loading libraries...</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <script src="/static/app.js"></script>
+</body>
+
+</html>

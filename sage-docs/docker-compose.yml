@@ -1,0 +1,49 @@
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: sage-docs-qdrant
+    ports:
+      - "6334:6333"
+    volumes:
+      - ./qdrant_storage:/qdrant/storage
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: sage-docs-backend
+    depends_on:
+      - qdrant
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./uploads:/app/uploads
+      - ./static:/app/static
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - COLLECTION_NAME=sage_docs
+      - UPLOAD_DIR=/app/uploads
+      # Embedding settings
+      - EMBEDDING_MODE=local
+      - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
+      - DENSE_VECTOR_SIZE=384
+      - USE_NOMIC_PREFIX=false
+    mem_limit: 6g
+    memswap_limit: 8g
+    restart: unless-stopped
+
+  mcp-server:
+    build: ./mcp-server
+    container_name: sage-docs-mcp
+    depends_on:
+      - qdrant
+    ports:
+      - "8000:8000"
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - COLLECTION_NAME=sage_docs
+      - EMBEDDING_MODE=local
+      - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
+      - USE_NOMIC_PREFIX=false
+    restart: unless-stopped
