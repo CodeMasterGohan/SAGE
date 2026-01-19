@@ -16,9 +16,11 @@ ENV/
 
 # Docker
 qdrant_storage/
+qdrant_data/
+.qdrant/
 
 # Uploads (if you want to ignore)
-# uploads/
+uploads/
 
 # OS
 .DS_Store

@@ -314,12 +314,14 @@
 
                 <!-- Upload Progress -->
                 <div id="uploadProgress" class="mt-6 hidden">
-                    <div class="flex items-center justify-between mb-2">
-                        <span class="text-sm text-gray-300" id="uploadFileName">Uploading...</span>
-                        <span class="text-xs text-cyan-400" id="uploadPercent">0%</span>
-                    </div>
-                    <div class="upload-progress">
-                        <div class="upload-progress-bar" id="uploadProgressBar" style="width: 0%"></div>
+                    <div class="p-4 rounded-lg bg-cyan-900/20 border border-cyan-800">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-spinner fa-spin text-cyan-400 text-xl"></i>
+                            <div>
+                                <p class="text-cyan-400 font-medium" id="uploadFileName">Processing...</p>
+                                <p class="text-cyan-300/70 text-sm" id="uploadStatus">Starting upload...</p>
+                            </div>
+                        </div>
                     </div>
                 </div>
 

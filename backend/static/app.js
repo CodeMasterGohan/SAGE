@@ -146,6 +146,9 @@ async function handleFileUpload(files) {
         return;
     }
 
+    // Get status elements
+    const uploadStatus = document.getElementById('uploadStatus');
+
     // Show progress
     uploadProgress.classList.remove('hidden');
     uploadResult.classList.add('hidden');
@@ -153,14 +156,16 @@ async function handleFileUpload(files) {
     let totalFiles = files.length;
     let processed = 0;
     let totalChunks = 0;
+    let hasErrors = false;
 
     for (const file of files) {
         const isPDF = file.name.toLowerCase().endsWith('.pdf');
-        uploadFileName.textContent = isPDF
-            ? `Processing ${file.name} (this may take a while)...`
-            : `Uploading ${file.name}...`;
-        uploadPercent.textContent = `${Math.round((processed / totalFiles) * 100)}%`;
-        uploadProgressBar.style.width = `${(processed / totalFiles) * 100}%`;
+
+        // Update status
+        uploadFileName.textContent = file.name;
+        uploadStatus.textContent = isPDF
+            ? 'Starting PDF processing (this may take a while)...'
+            : 'Uploading...';
 
         try {
             const formData = new FormData();
@@ -170,6 +175,8 @@ async function handleFileUpload(files) {
 
             if (isPDF) {
                 // Use async endpoint for PDFs
+                uploadStatus.textContent = 'Sending to server...';
+
                 const asyncResponse = await fetch('/api/upload/async', {
                     method: 'POST',
                     body: formData
@@ -180,6 +187,7 @@ async function handleFileUpload(files) {
                     // Poll for status
                     const taskId = asyncResult.task_id;
                     let status = 'pending';
+                    uploadStatus.textContent = 'Converting PDF layout...';
 
                     while (status === 'pending' || status === 'processing') {
                         await new Promise(resolve => setTimeout(resolve, 2000));
@@ -189,20 +197,27 @@ async function handleFileUpload(files) {
                         status = statusData.status;
 
                         if (statusData.progress) {
-                            uploadFileName.textContent = `${file.name}: ${statusData.progress}`;
+                            uploadStatus.textContent = statusData.progress;
                         }
 
                         if (status === 'completed' && statusData.result) {
                             totalChunks += statusData.result.chunks_indexed;
+                            uploadStatus.textContent = 'Indexing complete!';
                         } else if (status === 'failed') {
                             console.error('Upload failed:', statusData.error);
+                            uploadStatus.textContent = `Error: ${statusData.error}`;
+                            hasErrors = true;
                         }
                     }
                 } else {
                     console.error('Async upload failed:', asyncResult);
+                    uploadStatus.textContent = 'Upload failed. Check console.';
+                    hasErrors = true;
                 }
             } else {
                 // Use regular sync endpoint for non-PDFs
+                uploadStatus.textContent = 'Uploading and processing...';
+
                 const response = await fetch('/api/upload', {
                     method: 'POST',
                     body: formData
@@ -212,24 +227,45 @@ async function handleFileUpload(files) {
 
                 if (response.ok) {
                     totalChunks += result.chunks_indexed;
+                    uploadStatus.textContent = 'Done!';
                 } else {
                     console.error('Upload failed:', result);
+                    uploadStatus.textContent = `Error: ${result.detail || 'Upload failed'}`;
+                    hasErrors = true;
                 }
             }
         } catch (error) {
             console.error('Upload error:', error);
+            uploadStatus.textContent = `Error: ${error.message}`;
+            hasErrors = true;
         }
 
         processed++;
-        uploadPercent.textContent = `${Math.round((processed / totalFiles) * 100)}%`;
-        uploadProgressBar.style.width = `${(processed / totalFiles) * 100}%`;
     }
 
     // Show result
     uploadProgress.classList.add('hidden');
     uploadResult.classList.remove('hidden');
-    uploadResultTitle.textContent = 'Upload successful!';
-    uploadResultMessage.textContent = `Indexed ${totalChunks} chunks from ${processed} files into ${library} v${version}`;
+
+    if (hasErrors || totalChunks === 0) {
+        uploadResultTitle.textContent = totalChunks > 0 ? 'Upload completed with issues' : 'Upload failed';
+        uploadResultMessage.textContent = totalChunks > 0
+            ? `Indexed ${totalChunks} chunks but some files had errors. Check console.`
+            : 'No content was indexed. Check console for errors.';
+        // Change to error styling
+        uploadResult.querySelector('div').className = 'p-4 rounded-lg bg-red-900/20 border border-red-800';
+        uploadResult.querySelector('i').className = 'fa-solid fa-exclamation-circle text-red-400 text-xl';
+        uploadResultTitle.className = 'text-red-400 font-medium';
+        uploadResultMessage.className = 'text-red-300/70 text-sm';
+    } else {
+        uploadResultTitle.textContent = 'Upload successful!';
+        uploadResultMessage.textContent = `Indexed ${totalChunks} chunks from ${processed} file(s) into "${library}" v${version}`;
+        // Reset to success styling
+        uploadResult.querySelector('div').className = 'p-4 rounded-lg bg-green-900/20 border border-green-800';
+        uploadResult.querySelector('i').className = 'fa-solid fa-check-circle text-green-400 text-xl';
+        uploadResultTitle.className = 'text-green-400 font-medium';
+        uploadResultMessage.className = 'text-green-300/70 text-sm';
+    }
 
     // Refresh libraries
     loadLibraries();
