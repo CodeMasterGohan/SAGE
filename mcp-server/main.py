@@ -274,7 +274,7 @@ def list_libraries() -> list[dict]:
     """
     List all indexed libraries and their versions.
     
-    Uses Qdrant's optimized facet API for O(1) performance.
+    Optimized: Uses scroll with payload projection instead of N+1 facet queries.
     
     Returns:
         List of libraries with their available versions.
@@ -282,34 +282,56 @@ def list_libraries() -> list[dict]:
     client = get_qdrant_client()
 
     try:
+        # Query 1: Get all unique libraries
         library_facets = client.facet(
             collection_name=COLLECTION_NAME,
             key="library",
             limit=1000
         )
 
+        if not library_facets.hits:
+            return []
+
+        # Build library-version mapping using scroll with minimal payload
+        library_versions: dict[str, set[str]] = {hit.value: set() for hit in library_facets.hits}
+        
+        # Single scroll query to get all library-version pairs
+        results, next_offset = client.scroll(
+            collection_name=COLLECTION_NAME,
+            limit=2000,
+            with_payload=["library", "version"],
+            with_vectors=False
+        )
+        
+        for point in results:
+            lib = point.payload.get("library")
+            ver = point.payload.get("version")
+            if lib in library_versions and ver:
+                library_versions[lib].add(ver)
+        
+        # Continue scrolling if needed
+        while next_offset and len(results) == 2000:
+            results, next_offset = client.scroll(
+                collection_name=COLLECTION_NAME,
+                offset=next_offset,
+                limit=2000,
+                with_payload=["library", "version"],
+                with_vectors=False
+            )
+            for point in results:
+                lib = point.payload.get("library")
+                ver = point.payload.get("version")
+                if lib in library_versions and ver:
+                    library_versions[lib].add(ver)
+        
+        # Build result
         result = []
         for hit in library_facets.hits:
             lib_name = hit.value
-
-            version_facets = client.facet(
-                collection_name=COLLECTION_NAME,
-                key="version",
-                facet_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="library",
-                            match=models.MatchValue(value=lib_name)
-                        )
-                    ]
-                ),
-                limit=100
-            )
-
-            versions = [v.value for v in version_facets.hits]
+            versions = sorted(library_versions.get(lib_name, set()), reverse=True)
             result.append({
                 "library": lib_name,
-                "versions": sorted(versions, reverse=True)
+                "versions": versions
             })
 
         return sorted(result, key=lambda x: x["library"])
@@ -329,6 +351,8 @@ def resolve_library(
     
     Use this BEFORE search_docs to identify the correct library filter.
     Returns libraries ranked by relevance with document counts.
+    
+    Optimized: Fetches versions for top matches in a single scroll query.
     
     Args:
         query: Library name to search for (e.g., "react", "python requests")
@@ -375,21 +399,42 @@ def resolve_library(
         scored.sort(key=lambda x: (-x["relevance_score"], -x["doc_count"]))
         top_matches = scored[:limit]
         
+        if not top_matches:
+            return []
+        
+        # Build version map for top matches only (batch approach)
+        top_lib_names = {m["library"] for m in top_matches}
+        library_versions: dict[str, set[str]] = {lib: set() for lib in top_lib_names}
+        
+        # Single scroll query with filter for matched libraries
+        scroll_filter = models.Filter(
+            should=[
+                models.FieldCondition(
+                    key="library",
+                    match=models.MatchValue(value=lib_name)
+                )
+                for lib_name in top_lib_names
+            ]
+        )
+        
+        results, _ = client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=scroll_filter,
+            limit=1000,
+            with_payload=["library", "version"],
+            with_vectors=False
+        )
+        
+        for point in results:
+            lib = point.payload.get("library")
+            ver = point.payload.get("version")
+            if lib in library_versions and ver:
+                library_versions[lib].add(ver)
+        
+        # Add versions to matches
         for match in top_matches:
-            version_facets = client.facet(
-                collection_name=COLLECTION_NAME,
-                key="version",
-                facet_filter=models.Filter(
-                    must=[
-                        models.FieldCondition(
-                            key="library",
-                            match=models.MatchValue(value=match["library"])
-                        )
-                    ]
-                ),
-                limit=10
-            )
-            match["versions"] = sorted([v.value for v in version_facets.hits], reverse=True)
+            lib_name = match["library"]
+            match["versions"] = sorted(library_versions.get(lib_name, set()), reverse=True)[:10]
         
         return top_matches
         
