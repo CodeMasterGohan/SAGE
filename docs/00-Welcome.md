@@ -31,7 +31,7 @@ Built with modern, production-ready technologies:
 | `FastAPI 0.109` | High-performance REST API framework |
 | `Qdrant Client` | Vector database for semantic search |
 | `FastEmbed` | Local embedding model inference |
-| `Docling` | PDF-to-markdown conversion with layout analysis |
+| `olmocr` | PDF-to-markdown conversion with vision-language model |
 | `MCP SDK` | Model Context Protocol for LLM integration |
 | `BeautifulSoup4` | HTML parsing and cleanup |
 | `python-docx` | Microsoft Word document processing |
@@ -91,6 +91,7 @@ Navigate through the docs:
 | [🧠 Developer Internals](./03-Developer-Internals.md) | Architecture deep-dive for contributors |
 | [🔌 MCP Configuration](./04-MCP-Configuration.md) | Connect to VS Code, Claude, Gemini CLI |
 | [🌐 Integrations Guide](./05-Integrations-Guide.md) | Remote access, Open WebUI, MCPO, security |
+| [🕵️ Deep Dive Workflows](./06-Deep-Dive-Workflows.md) | Step-by-step lifecycle flow (Startup, Ingestion, Search) |
 
 ---
 
