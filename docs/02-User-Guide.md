@@ -86,7 +86,7 @@ SAGE-Docs can process:
 | **Markdown** | `.md`, `.markdown` | Preserves headers and code blocks |
 | **HTML** | `.html`, `.htm` | Converted to clean Markdown |
 | **Plain Text** | `.txt`, `.rst` | Chunked as-is |
-| **PDF** | `.pdf` | Uses Docling for layout analysis |
+| **PDF** | `.pdf` | Uses olmocr for layout analysis |
 | **Word** | `.docx` | Extracts text with heading structure |
 | **Excel** | `.xlsx`, `.xls` | Converts sheets to searchable text |
 | **Archives** | `.zip` | Extracts and processes all docs inside |

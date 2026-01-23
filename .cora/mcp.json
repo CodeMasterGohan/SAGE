@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "sage": {
+      "url": "http://localhost:8000/mcp",
+      "alwaysAllow": [
+        "search_docs",
+        "list_libraries",
+        "resolve_library",
+        "get_document"
+      ]
+    }
+  }
+}

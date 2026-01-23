@@ -56,7 +56,7 @@ SAGE/
         ▼           ▼           ▼              ▼
     ┌───────┐  ┌────────┐  ┌────────┐    ┌──────────┐
     │  MD   │  │  HTML  │  │  PDF   │    │   ZIP    │
-    │       │  │  ─▶MD  │  │Docling │    │ Extract  │
+    │       │  │  ─▶MD  │  │ olmocr │    │ Extract  │
     └───┬───┘  └───┬────┘  └───┬────┘    └────┬─────┘
         │          │           │              │
         └──────────┴─────┬─────┴──────────────┘
@@ -154,7 +154,7 @@ The document processor handles:
 |----------|---------|
 | `detect_file_type()` | Determine format from extension/content |
 | `convert_html_to_markdown()` | Clean HTML → Markdown conversion |
-| `extract_pdf_text()` | Docling PDF processing |
+| `extract_pdf_text()` | olmocr PDF processing |
 | `extract_docx_text()` | Word document extraction |
 | `extract_excel_text()` | Excel spreadsheet parsing |
 | `split_text_semantic()` | Smart chunking with overlap |
@@ -347,7 +347,7 @@ backend:
 
 | Component | Bottleneck | Optimization |
 |-----------|------------|--------------|
-| PDF Processing | Docling layout analysis | Async upload endpoint |
+| PDF Processing | olmocr layout analysis | Async upload endpoint |
 | Embedding | Model inference | Lazy load, cache models |
 | Search | Vector similarity | INT8 quantization |
 | BM25 | Index size | In-memory sparse vectors |

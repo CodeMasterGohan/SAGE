@@ -17,10 +17,33 @@ import yaml
 
 from markdownify import markdownify as md
 from bs4 import BeautifulSoup
-from docling.document_converter import DocumentConverter
+import subprocess
+import shutil
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from fastembed import TextEmbedding, SparseTextEmbedding
+
+# Tokenizer imports for token counting and batching
+try:
+    from tokenizers import Tokenizer
+    TOKENIZER_AVAILABLE = True
+except ImportError:
+    TOKENIZER_AVAILABLE = False
+
+# Import Vault processing functions
+import sys
+VAULT_PATH = Path(__file__).parent.parent / "vault"
+if str(VAULT_PATH) not in sys.path:
+    sys.path.insert(0, str(VAULT_PATH))
+
+try:
+    from main import (
+        process_document_async as vault_process_document,
+        ensure_collection as vault_ensure_collection
+    )
+    VAULT_AVAILABLE = True
+except ImportError as e:
+    VAULT_AVAILABLE = False
 
 # Optional imports for DOCX and Excel
 try:
@@ -58,9 +81,89 @@ DENSE_MODEL_NAME = os.getenv("DENSE_MODEL_NAME", "sentence-transformers/all-Mini
 DENSE_VECTOR_SIZE = int(os.getenv("DENSE_VECTOR_SIZE", "384"))
 USE_NOMIC_PREFIX = os.getenv("USE_NOMIC_PREFIX", "false").lower() == "true"
 
+# Tokenizer configuration for batching
+MAX_BATCH_TOKENS = int(os.getenv("MAX_BATCH_TOKENS", "2000"))
+MAX_CHUNK_TOKENS = int(os.getenv("MAX_CHUNK_TOKENS", "500"))
+
 # Global model instances
 _dense_model: Optional[TextEmbedding] = None
 _sparse_model: Optional[SparseTextEmbedding] = None
+_tokenizer: Optional[Tokenizer] = None
+
+
+def get_tokenizer() -> Optional[Tokenizer]:
+    """
+    Get or create tokenizer for token counting.
+    Uses BERT WordPiece tokenizer as a conservative proxy for most embedding models.
+    """
+    global _tokenizer
+    if _tokenizer is None:
+        try:
+            _tokenizer = Tokenizer.from_pretrained("bert-base-uncased")
+            logger.info("Loaded bert-base-uncased tokenizer for token counting")
+        except Exception as e:
+            logger.warning(f"Could not load bert tokenizer: {e}. Using whitespace fallback.")
+            _tokenizer = None
+    return _tokenizer
+
+
+def count_tokens(text: str) -> int:
+    """Count tokens in text using the tokenizer, or fallback to word count estimate."""
+    tokenizer = get_tokenizer()
+    if tokenizer:
+        return len(tokenizer.encode(text).ids)
+    else:
+        # Fallback: rough estimate (words * 1.3)
+        return int(len(text.split()) * 1.3)
+
+
+def truncate_to_tokens(text: str, max_tokens: int) -> str:
+    """Truncate text to a maximum number of tokens."""
+    tokenizer = get_tokenizer()
+    if tokenizer:
+        encoded = tokenizer.encode(text)
+        if len(encoded.ids) <= max_tokens:
+            return text
+        truncated_ids = encoded.ids[:max_tokens]
+        return tokenizer.decode(truncated_ids)
+    else:
+        # Fallback: approximate character truncation (2.5 chars per token)
+        char_limit = int(max_tokens * 2.5)
+        if len(text) <= char_limit:
+            return text
+        return text[:char_limit] + "..."
+
+
+def yield_safe_batches(chunks_data: list[dict], max_tokens: int = MAX_BATCH_TOKENS):
+    """
+    Yields batches of chunk dicts such that the total token count per batch
+    does not exceed max_tokens. Truncates individual chunks if they are too large.
+    """
+    current_batch = []
+    current_tokens = 0
+
+    for item in chunks_data:
+        text = item["text"]
+        # Account for prefix tokens (~5 tokens for "search_document: ")
+        item_tokens = count_tokens(text) + 5
+
+        # Truncate if a single chunk is too large
+        if item_tokens > max_tokens:
+            logger.warning(f"Chunk too large ({item_tokens} tokens). Truncating to {MAX_CHUNK_TOKENS}...")
+            item["text"] = truncate_to_tokens(text, MAX_CHUNK_TOKENS)
+            item_tokens = count_tokens(item["text"]) + 5
+
+        # Start new batch if this item would exceed limit
+        if current_batch and (current_tokens + item_tokens > max_tokens):
+            yield current_batch
+            current_batch = []
+            current_tokens = 0
+
+        current_batch.append(item)
+        current_tokens += item_tokens
+
+    if current_batch:
+        yield current_batch
 
 
 def get_dense_model() -> TextEmbedding:
@@ -139,26 +242,71 @@ def convert_html_to_markdown(html_content: str) -> str:
 
 
 def extract_pdf_text(pdf_content: bytes) -> str:
-    """Extract text from PDF file using Docling for layout preservation."""
+    """Extract text from PDF file using olmocr for layout preservation."""
     import tempfile
+    
+    # olmocr configuration from environment
+    olmocr_server = os.getenv("OLMOCR_SERVER", "")  # External vLLM server URL
+    olmocr_api_key = os.getenv("OLMOCR_API_KEY", "")  # API key for external providers
+    olmocr_model = os.getenv("OLMOCR_MODEL", "allenai/olmOCR-2-7B-1025-FP8")
+    
     try:
-        # Write PDF to temp file (Docling requires file path)
+        # Write PDF to temp file
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp.write(pdf_content)
             tmp_path = tmp.name
         
-        logger.info("Converting PDF with Docling (this may take a while)...")
-        converter = DocumentConverter()
-        result = converter.convert(tmp_path)
-        markdown = result.document.export_to_markdown()
+        # Create workspace for olmocr output
+        workspace = tempfile.mkdtemp(prefix="olmocr_")
         
-        # Clean up temp file
+        logger.info("Converting PDF with olmocr (this may take a while)...")
+        
+        # Build command
+        cmd = [
+            "python", "-m", "olmocr.pipeline", workspace,
+            "--markdown", "--pdfs", tmp_path,
+            "--model", olmocr_model
+        ]
+        
+        # Add server/API configuration if provided
+        if olmocr_server:
+            cmd.extend(["--server", olmocr_server])
+        if olmocr_api_key:
+            cmd.extend(["--api_key", olmocr_api_key])
+        
+        # Run olmocr pipeline
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=600  # 10 minute timeout for large PDFs
+        )
+        
+        if result.returncode != 0:
+            logger.error(f"olmocr failed: {result.stderr}")
+            return ""
+        
+        # Read generated markdown
+        pdf_stem = Path(tmp_path).stem
+        md_file = Path(workspace) / "markdown" / f"{pdf_stem}.md"
+        
+        if md_file.exists():
+            markdown = md_file.read_text()
+            logger.info(f"PDF conversion complete: {len(markdown)} chars")
+        else:
+            logger.warning(f"olmocr did not produce markdown output for {tmp_path}")
+            markdown = ""
+        
+        # Clean up
         os.remove(tmp_path)
+        shutil.rmtree(workspace, ignore_errors=True)
         
-        logger.info(f"PDF conversion complete: {len(markdown)} chars")
         return markdown
+    except subprocess.TimeoutExpired:
+        logger.error("olmocr timed out processing PDF")
+        return ""
     except Exception as e:
-        logger.error(f"Error extracting PDF with Docling: {e}")
+        logger.error(f"Error extracting PDF with olmocr: {e}")
         return ""
 
 
@@ -421,9 +569,29 @@ async def _ingest_markdown(
     library: str,
     version: str
 ) -> int:
-    """Ingest markdown content as chunks."""
+    """Ingest markdown content as chunks using Vault's batched async processing."""
     # Extract title
     title = extract_title_from_content(markdown, filename)
+    
+    # Save original file
+    file_path = save_uploaded_file(markdown.encode(), filename, library, version)
+    
+    # Use Vault for processing if available
+    if VAULT_AVAILABLE:
+        logger.info(f"Using Vault for async processing: {filename}")
+        result = await vault_process_document(
+            client=client,
+            content=markdown,
+            filename=filename,
+            library=library,
+            version=version,
+            title=title,
+            file_path=str(file_path)
+        )
+        return result.get("chunks_indexed", 0)
+    
+    # Fallback: Use local processing if Vault not available
+    logger.info(f"Vault not available, using local processing for {filename}")
     
     # Split into chunks
     chunks = split_text_semantic(markdown)
@@ -435,59 +603,73 @@ async def _ingest_markdown(
     dense_model = get_dense_model()
     sparse_model = get_sparse_model()
     
-    # Save original file
-    file_path = save_uploaded_file(markdown.encode(), filename, library, version)
+    # Prepare chunk data for batching
+    chunks_data = [
+        {"text": chunk, "index": i}
+        for i, chunk in enumerate(chunks)
+    ]
     
-    # Generate embeddings
-    points = []
+    # Generate embeddings in batches
+    total_chunks = len(chunks_data)
+    chunk_batches = list(yield_safe_batches(chunks_data, max_tokens=MAX_BATCH_TOKENS))
+    logger.info(f"Processing {total_chunks} chunks in {len(chunk_batches)} batches for {filename}")
     
-    for i, chunk in enumerate(chunks):
-        # Prepare text for embedding
-        embed_text = chunk
+    all_points = []
+    
+    for batch in chunk_batches:
+        batch_texts = [item["text"] for item in batch]
+        
+        # Prepare texts for dense embedding
         if USE_NOMIC_PREFIX:
-            embed_text = f"search_document: {chunk}"
+            embed_texts = [f"search_document: {t}" for t in batch_texts]
+        else:
+            embed_texts = batch_texts
         
-        # Generate dense embedding
-        dense_embedding = list(dense_model.embed([embed_text]))[0].tolist()
+        # Generate dense embeddings for the batch
+        dense_embeddings = list(dense_model.embed(embed_texts))
         
-        # Generate sparse embedding
-        sparse_result = list(sparse_model.embed([chunk]))[0]
-        sparse_embedding = models.SparseVector(
-            indices=sparse_result.indices.tolist(),
-            values=sparse_result.values.tolist()
-        )
+        # Generate sparse embeddings for the batch
+        sparse_embeddings = list(sparse_model.embed(batch_texts))
         
-        # Create unique ID
-        chunk_id = get_content_hash(f"{library}:{version}:{filename}:{i}:{chunk[:100]}")
-        
-        point = models.PointStruct(
-            id=chunk_id,
-            vector={
-                "dense": dense_embedding,
-                "sparse": sparse_embedding
-            },
-            payload={
-                "content": chunk,
-                "library": library,
-                "version": version,
-                "title": title,
-                "file_path": str(file_path),
-                "chunk_index": i,
-                "total_chunks": len(chunks),
-                "type": "document"
-            }
-        )
-        points.append(point)
+        # Create points for this batch
+        for item, dense_vec, sparse_vec in zip(batch, dense_embeddings, sparse_embeddings):
+            chunk_text = item["text"]
+            chunk_index = item["index"]
+            
+            # Create unique ID
+            chunk_id = get_content_hash(f"{library}:{version}:{filename}:{chunk_index}:{chunk_text[:100]}")
+            
+            point = models.PointStruct(
+                id=chunk_id,
+                vector={
+                    "dense": dense_vec.tolist(),
+                    "sparse": models.SparseVector(
+                        indices=sparse_vec.indices.tolist(),
+                        values=sparse_vec.values.tolist()
+                    )
+                },
+                payload={
+                    "content": chunk_text,
+                    "library": library,
+                    "version": version,
+                    "title": title,
+                    "file_path": str(file_path),
+                    "chunk_index": chunk_index,
+                    "total_chunks": total_chunks,
+                    "type": "document"
+                }
+            )
+            all_points.append(point)
     
-    # Upsert to Qdrant
-    if points:
+    # Upsert all points to Qdrant
+    if all_points:
         client.upsert(
             collection_name=COLLECTION_NAME,
-            points=points
+            points=all_points
         )
-        logger.info(f"Indexed {len(points)} chunks for {filename}")
+        logger.info(f"Indexed {len(all_points)} chunks for {filename}")
     
-    return len(points)
+    return len(all_points)
 
 
 def save_uploaded_file(content: bytes, filename: str, library: str, version: str) -> Path:

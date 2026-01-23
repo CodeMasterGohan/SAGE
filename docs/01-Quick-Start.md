@@ -155,7 +155,7 @@ memswap_limit: 6g
 
 ### PDF Upload Stuck
 
-PDF processing uses Docling for layout analysis, which can be slow. Check processing status:
+PDF processing uses olmocr for layout analysis, which can be slow. Check processing status:
 
 ```bash
 docker-compose logs -f backend

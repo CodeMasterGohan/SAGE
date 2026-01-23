@@ -8,16 +8,16 @@ services:
       - qdrant_data:/qdrant/storage
     restart: unless-stopped
 
-  backend:
-    build: ./backend
-    container_name: sage-docs-backend
+  dashboard:
+    build: ./dashboard
+    container_name: sage-docs-dashboard
     depends_on:
       - qdrant
     ports:
       - "8080:8080"
     volumes:
       - ./uploads:/app/uploads
-      - ./backend/static:/app/static
+      - ./dashboard/static:/app/static
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
@@ -28,9 +28,66 @@ services:
       - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
       - DENSE_VECTOR_SIZE=384
       - USE_NOMIC_PREFIX=false
+      # Remote vLLM embeddings (optional - set EMBEDDING_MODE=remote to use)
+      - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
+      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      # olmocr PDF processing (set OLMOCR_SERVER for remote instance)
+      - OLMOCR_SERVER=${OLMOCR_SERVER:-} # e.g., http://olmocr:8000/v1 or https://api.deepinfra.com/v1/openai
+      - OLMOCR_API_KEY=${OLMOCR_API_KEY:-}
+      - OLMOCR_MODEL=${OLMOCR_MODEL:-allenai/olmOCR-2-7B-1025-FP8}
     mem_limit: 6g
     memswap_limit: 8g
     restart: unless-stopped
+
+  refinery:
+    build: ./refinery
+    container_name: sage-docs-refinery
+    depends_on:
+      - qdrant
+    volumes:
+      - ./uploads:/app/uploads
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - COLLECTION_NAME=sage_docs
+      - UPLOAD_DIR=/app/uploads
+      - EMBEDDING_MODE=local
+      - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
+      - DENSE_VECTOR_SIZE=384
+      - USE_NOMIC_PREFIX=false
+      # olmocr PDF processing (set OLMOCR_SERVER for remote instance)
+      - OLMOCR_SERVER=${OLMOCR_SERVER:-}
+      - OLMOCR_API_KEY=${OLMOCR_API_KEY:-}
+      - OLMOCR_MODEL=${OLMOCR_MODEL:-allenai/olmOCR-2-7B-1025-FP8}
+    restart: unless-stopped
+
+  vault:
+    build: ./vault
+    container_name: sage-docs-vault
+    depends_on:
+      - qdrant
+    volumes:
+      - ./uploads:/app/uploads
+    environment:
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - COLLECTION_NAME=sage_docs
+      # Embedding settings (must match dashboard)
+      - EMBEDDING_MODE=local
+      - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
+      - DENSE_VECTOR_SIZE=384
+      - USE_NOMIC_PREFIX=false
+      # Remote vLLM embeddings (optional)
+      - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
+      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      # Batching configuration
+      - MAX_BATCH_TOKENS=2000
+      - VAULT_CONCURRENCY=${VAULT_CONCURRENCY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: "no"
 
   mcp-server:
     build: ./mcp-server
@@ -39,6 +96,7 @@ services:
       - qdrant
     ports:
       - "8000:8000"
+      - "8090:8080"
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
@@ -46,7 +104,28 @@ services:
       - EMBEDDING_MODE=local
       - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
       - USE_NOMIC_PREFIX=false
+      # Remote vLLM embeddings (optional)
+      - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
+      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
+      - VLLM_API_KEY=${VLLM_API_KEY:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
+  # sage-proxy:
+  #   build: ./mcpo
+  #   container_name: sage-mcpo
+  #   depends_on:
+  #     - mcp-server
+  #   network_mode: service:mcp-server
+  #   entrypoint: [ "/bin/sh", "-c" ]
+  #   command: >
+  #     "echo 'Waiting for mcp-server...' && 
+  #      until curl -s http://localhost:8000/health > /dev/null || curl -s http://localhost:8000/sse > /dev/null || curl -s http://localhost:8000/ > /dev/null; do
+  #        echo 'mcp-server not ready, sleeping 2s...'
+  #        sleep 2
+  #      done &&
+  #      echo 'mcp-server is up!' &&
+  #      exec mcpo --server-type streamable_http --port 8080 --host 0.0.0.0 -- http://localhost:8000/sse"
 
 volumes:
   qdrant_data:

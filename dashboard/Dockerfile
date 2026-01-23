@@ -16,16 +16,11 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies for Docling
+# Install runtime dependencies for olmocr
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libxcb1 \
-    libx11-6 \
-    libxext6 \
-    libxrender1 \
-    libfontconfig1 \
-    libfreetype6 \
-    libgl1 \
-    libglib2.0-0 \
+    poppler-utils \
+    fonts-freefont-ttf \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user with fixed UID to match host
