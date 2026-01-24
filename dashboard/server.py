@@ -11,8 +11,10 @@ import uuid
 import threading
 from typing import Optional, Annotated
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
+from fastapi.concurrency import run_in_threadpool
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
@@ -30,6 +32,7 @@ logger = logging.getLogger("SAGE-Dashboard")
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "sage_docs")
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", "/app/uploads")).resolve()
 
 # Embedding configuration (must match ingest settings)
 EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "local")
@@ -679,8 +682,52 @@ async def get_document(
     file_path: str,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DocumentResult:
-    """Get the full content of a specific document by its file path."""
+    """
+    Get the full content of a specific document by its file path.
+
+    Optimized: Reads directly from disk if available (O(1)), falling back to Qdrant (O(N)).
+    """
     
+    # 1. Try to read from disk (Performance Optimization)
+    try:
+        path = Path(file_path).resolve()
+
+        # Security check: ensure path is within UPLOAD_DIR
+        if path.is_relative_to(UPLOAD_DIR) and path.exists() and path.is_file():
+            # Fetch metadata from Qdrant (minimal payload)
+            # We still need metadata like title, type, etc.
+            results, _ = client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="file_path",
+                            match=models.MatchValue(value=file_path)
+                        )
+                    ]
+                ),
+                limit=1,
+                with_payload=["title", "library", "version", "type", "total_chunks"],
+                with_vectors=False
+            )
+
+            if results:
+                payload = results[0].payload
+                # Read content from disk (fast) - use threadpool to avoid blocking loop
+                content = await run_in_threadpool(path.read_text, encoding="utf-8", errors="replace")
+
+                return DocumentResult(
+                    title=payload.get("title", ""),
+                    library=payload.get("library", "unknown"),
+                    version=payload.get("version", "unknown"),
+                    type=payload.get("type", ""),
+                    content=content,
+                    chunk_count=payload.get("total_chunks", 1)
+                )
+    except Exception as e:
+        logger.warning(f"Failed to read from disk, falling back to Qdrant: {e}")
+
+    # 2. Fallback to Qdrant (Original logic)
     try:
         results, _ = client.scroll(
             collection_name=COLLECTION_NAME,
