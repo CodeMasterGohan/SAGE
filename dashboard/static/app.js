@@ -281,28 +281,32 @@ function renderLibraryManager() {
         return;
     }
 
-    libraryManager.innerHTML = libraries.map(lib => `
+    libraryManager.innerHTML = libraries.map(lib => {
+        const safeLibrary = escapeHtml(lib.library);
+        const safeLibraryAttr = safeLibrary.replace(/'/g, "\\'");
+        return `
         <div class="flex items-center justify-between p-3 bg-[#0d1117] rounded-lg border border-gray-800">
             <div class="flex items-center gap-3">
                 <div class="w-8 h-8 rounded bg-gradient-to-br from-cyan-500/20 to-blue-500/20 flex items-center justify-center">
                     <i class="fa-solid fa-book text-cyan-400 text-sm"></i>
                 </div>
                 <div>
-                    <span class="text-white font-medium">${lib.library}</span>
+                    <span class="text-white font-medium">${safeLibrary}</span>
                     <div class="flex gap-1 mt-1">
-                        ${lib.versions.map(v => `<span class="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">${v}</span>`).join('')}
+                        ${lib.versions.map(v => `<span class="text-[10px] px-1.5 py-0.5 bg-gray-800 rounded text-gray-400">${escapeHtml(v)}</span>`).join('')}
                     </div>
                 </div>
             </div>
             <button 
-                onclick="deleteLibrary('${lib.library}')"
+                onclick="deleteLibrary('${safeLibraryAttr}')"
                 class="delete-btn p-2 rounded-lg text-gray-500 hover:text-red-400"
                 title="Delete library"
             >
                 <i class="fa-solid fa-trash"></i>
             </button>
         </div>
-    `).join('');
+    `;
+    }).join('');
 }
 
 async function deleteLibrary(library) {
@@ -394,20 +398,25 @@ function renderLibraries(libs) {
         return;
     }
 
-    libraryList.innerHTML = libs.map(lib => `
+    libraryList.innerHTML = libs.map(lib => {
+        const safeLibrary = escapeHtml(lib.library);
+        const safeLibraryAttr = safeLibrary.replace(/'/g, "\\'");
+        const safeVersion = lib.versions.length > 0 ? escapeHtml(lib.versions[0]) : '';
+        return `
     <li>
       <a 
         class="library-item flex items-center justify-between px-4 py-2 text-sm text-sage-textMuted hover:text-white rounded-md cursor-pointer ${currentLibrary === lib.library ? 'active' : ''}"
-        onclick="selectLibrary('${lib.library}')"
+        onclick="selectLibrary('${safeLibraryAttr}')"
       >
         <div class="flex items-center gap-3">
           <i class="fa-solid fa-book w-4 text-center"></i>
-          <span class="library-name">${lib.library}</span>
+          <span class="library-name">${safeLibrary}</span>
         </div>
-        <span class="text-xs text-gray-600">${lib.versions.length > 0 ? lib.versions[0] : ''}</span>
+        <span class="text-xs text-gray-600">${safeVersion}</span>
       </a>
     </li>
-  `).join('');
+  `;
+    }).join('');
 }
 
 function filterLibraries() {
@@ -497,20 +506,24 @@ async function showSuggestions(query) {
         const suggestions = await response.json();
 
         if (suggestions.length > 0) {
-            suggestionList.innerHTML = suggestions.map((s, i) => `
+            suggestionList.innerHTML = suggestions.map((s, i) => {
+                const safeLibrary = escapeHtml(s.library);
+                const safeLibraryAttr = safeLibrary.replace(/'/g, "\\'");
+                return `
         <li 
           class="suggestion-item flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer ${i === 0 ? 'bg-[#1f2937] border border-cyan-900/30' : ''}"
-          onclick="selectLibrary('${s.library}'); performSearch();"
+          onclick="selectLibrary('${safeLibraryAttr}'); performSearch();"
         >
           <div class="flex items-center gap-3">
             <i class="fa-solid fa-arrow-right ${i === 0 ? 'text-sage-accent' : 'text-gray-600'}"></i>
             <span class="text-sm ${i === 0 ? 'font-medium text-white' : 'text-gray-300'}">
-              Search in <span class="${i === 0 ? 'text-cyan-400 font-bold' : ''}">${s.library}</span>
+              Search in <span class="${i === 0 ? 'text-cyan-400 font-bold' : ''}">${safeLibrary}</span>
             </span>
           </div>
           ${i === 0 ? '<span class="text-[10px] bg-cyan-950 text-cyan-400 border border-cyan-800 px-2 py-0.5 rounded shadow-sm">Best Match</span>' : `<span class="text-xs text-gray-600">${s.doc_count} docs</span>`}
         </li>
-      `).join('');
+      `;
+            }).join('');
 
             searchSuggestions.classList.remove('hidden');
         } else {

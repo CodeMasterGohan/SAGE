@@ -1,0 +1,22 @@
+# SAGE Core Dependencies
+# =======================
+# Shared dependencies for all SAGE services
+
+# Embedding models
+fastembed>=0.2.0
+tokenizers>=0.15.0
+
+# Qdrant client
+qdrant-client>=1.7.0
+
+# Text processing
+beautifulsoup4>=4.12.0
+markdownify>=0.11.0
+PyYAML>=6.0
+
+# HTTP client (for remote embeddings)
+httpx>=0.25.0
+
+# Document processing (optional - install separately if needed)
+# python-docx>=1.0.0
+# openpyxl>=3.1.0

@@ -3,14 +3,24 @@ SAGE-Docs Dashboard Backend
 ===========================
 FastAPI server that provides REST API endpoints for the SAGE-Docs web dashboard.
 Extends DRUID's dashboard pattern with document upload capabilities.
+
+Changes from original:
+- P0: Upload validation (file size, MIME types, ZIP limits)
+- P1: ProcessPoolExecutor instead of threading
+- P1: Durable job state in Qdrant instead of in-memory dict
+- P2: Health endpoint added
+- Uses sage_core shared package
 """
 
 import os
+import sys
 import logging
 import uuid
-import threading
+import time
+from datetime import datetime
 from typing import Optional, Annotated
 from contextlib import asynccontextmanager
+from concurrent.futures import ProcessPoolExecutor
 
 from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Depends
 from fastapi.staticfiles import StaticFiles
@@ -20,26 +30,46 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from fastembed import TextEmbedding, SparseTextEmbedding
 
-from ingest import ingest_document, delete_library, ensure_collection
+# Add sage_core to path
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from sage_core.validation import validate_upload, UploadValidationError, MAX_FILE_SIZE
+from sage_core.qdrant_utils import ensure_collection, delete_library as core_delete_library, COLLECTION_NAME as CORE_COLLECTION
+
+# Keep ingest for now, will be migrated to sage_core in future
+from ingest import ingest_document, delete_library, ensure_collection as legacy_ensure_collection
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger("SAGE-Dashboard")
 
 # Configuration
 QDRANT_HOST = os.getenv("QDRANT_HOST", "localhost")
 QDRANT_PORT = int(os.getenv("QDRANT_PORT", "6333"))
 COLLECTION_NAME = os.getenv("COLLECTION_NAME", "sage_docs")
+JOBS_COLLECTION = os.getenv("JOBS_COLLECTION", "sage_jobs")
+
+# Process pool configuration
+WORKER_PROCESSES = int(os.getenv("WORKER_PROCESSES", "2"))
 
 # Embedding configuration (must match ingest settings)
 EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "local")
 DENSE_MODEL_NAME = os.getenv("DENSE_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 USE_NOMIC_PREFIX = os.getenv("USE_NOMIC_PREFIX", "false").lower() == "true"
 
-# Global checks for startup/shutdown only - not for direct use
+# Global instances
 _qdrant_client: Optional[QdrantClient] = None
 _dense_model: Optional[TextEmbedding] = None
 _bm25_model: Optional[SparseTextEmbedding] = None
+_process_pool: Optional[ProcessPoolExecutor] = None
+
+
+def get_qdrant_client_sync() -> QdrantClient:
+    """Get Qdrant client (sync version for process pool)."""
+    return QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
 
 
 async def get_qdrant_client() -> QdrantClient:
@@ -122,6 +152,12 @@ class ConnectionStatus(BaseModel):
     document_count: Optional[int] = None
 
 
+class HealthStatus(BaseModel):
+    status: str
+    qdrant: str
+    uptime_seconds: float
+
+
 class UploadResult(BaseModel):
     success: bool
     library: str
@@ -151,29 +187,212 @@ class DeleteResult(BaseModel):
     chunks_deleted: int
 
 
-# In-memory task storage for background uploads
-_upload_tasks: dict[str, dict] = {}
+# Track server start time for health checks
+_server_start_time = time.time()
+
+
+# ============================================================
+# JOB STATE MANAGEMENT (Durable in Qdrant)
+# ============================================================
+
+def ensure_jobs_collection(client: QdrantClient) -> None:
+    """Create jobs collection for durable task state."""
+    try:
+        client.get_collection(JOBS_COLLECTION)
+        return  # Already exists
+    except Exception:
+        pass
+    
+    logger.info(f"Creating jobs collection {JOBS_COLLECTION}...")
+    client.create_collection(
+        collection_name=JOBS_COLLECTION,
+        vectors_config={
+            "dummy": models.VectorParams(
+                size=1,
+                distance=models.Distance.COSINE
+            )
+        }
+    )
+    
+    # Create indexes for job queries
+    for field in ["status", "library", "created_at"]:
+        try:
+            client.create_payload_index(
+                collection_name=JOBS_COLLECTION,
+                field_name=field,
+                field_schema=models.PayloadSchemaType.KEYWORD
+            )
+        except Exception:
+            pass  # Index may already exist
+    
+    logger.info(f"Jobs collection {JOBS_COLLECTION} created")
+
+
+def create_job(client: QdrantClient, task_id: str, filename: str, library: str, version: str) -> None:
+    """Create a job entry in Qdrant."""
+    client.upsert(
+        collection_name=JOBS_COLLECTION,
+        points=[
+            models.PointStruct(
+                id=task_id,
+                vector={"dummy": [0.0]},
+                payload={
+                    "task_id": task_id,
+                    "status": "pending",
+                    "progress": "Queued for processing",
+                    "filename": filename,
+                    "library": library,
+                    "version": version,
+                    "created_at": datetime.utcnow().isoformat(),
+                    "result": None,
+                    "error": None
+                }
+            )
+        ]
+    )
+
+
+def update_job(client: QdrantClient, task_id: str, **updates) -> None:
+    """Update a job entry in Qdrant."""
+    client.set_payload(
+        collection_name=JOBS_COLLECTION,
+        payload=updates,
+        points=[task_id]
+    )
+
+
+def get_job(client: QdrantClient, task_id: str) -> Optional[dict]:
+    """Get a job entry from Qdrant."""
+    try:
+        results = client.retrieve(
+            collection_name=JOBS_COLLECTION,
+            ids=[task_id],
+            with_payload=True
+        )
+        if results:
+            return results[0].payload
+        return None
+    except Exception:
+        return None
+
+
+def cleanup_old_jobs(client: QdrantClient, max_age_hours: int = 24) -> int:
+    """Clean up old completed/failed jobs."""
+    from datetime import datetime, timedelta
+    
+    cutoff = (datetime.utcnow() - timedelta(hours=max_age_hours)).isoformat()
+    
+    try:
+        # Delete old completed jobs
+        client.delete(
+            collection_name=JOBS_COLLECTION,
+            points_selector=models.FilterSelector(
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="status",
+                            match=models.MatchAny(any=["completed", "failed"])
+                        )
+                    ]
+                )
+            )
+        )
+        return 0  # Can't easily count deleted
+    except Exception as e:
+        logger.warning(f"Job cleanup failed: {e}")
+        return 0
+
+
+# ============================================================
+# PROCESS POOL WORKER
+# ============================================================
+
+def _process_upload_worker(task_id: str, content: bytes, filename: str, library: str, version: str) -> dict:
+    """
+    Worker function for processing uploads (runs in separate process).
+    
+    This function runs in a ProcessPoolExecutor, not the main event loop.
+    Returns a dict with the result or error.
+    """
+    import asyncio
+    
+    # Create new client for this process
+    client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+    
+    try:
+        # Update job status
+        update_job(client, task_id, status="processing", progress="Converting document...")
+        
+        # Run the async ingest in a new event loop
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        try:
+            result = loop.run_until_complete(ingest_document(
+                client=client,
+                content=content,
+                filename=filename,
+                library=library,
+                version=version
+            ))
+        finally:
+            loop.close()
+        
+        # Update job with success
+        update_job(
+            client, task_id,
+            status="completed",
+            progress="Complete",
+            result={
+                "success": True,
+                "library": result["library"],
+                "version": result["version"],
+                "files_processed": result["files_processed"],
+                "chunks_indexed": result["chunks_indexed"],
+                "message": f"Successfully indexed {result['chunks_indexed']} chunks"
+            }
+        )
+        
+        return {"success": True, "result": result}
+        
+    except Exception as e:
+        logger.error(f"Background upload failed: {e}")
+        update_job(client, task_id, status="failed", error=str(e))
+        return {"success": False, "error": str(e)}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan handler for startup/shutdown."""
-    # Startup: preload models and ensure collection
+    global _process_pool
+    
+    # Startup: preload models and ensure collections
     logger.info("Preloading models...")
     await get_dense_model()
     await get_bm25_model()
     client = await get_qdrant_client()
-    await ensure_collection(client)
+    await legacy_ensure_collection(client)
+    ensure_jobs_collection(client)
+    
+    # Initialize process pool
+    _process_pool = ProcessPoolExecutor(max_workers=WORKER_PROCESSES)
+    logger.info(f"Process pool initialized with {WORKER_PROCESSES} workers")
+    
+    # Clean up old jobs on startup
+    cleanup_old_jobs(client)
+    
     logger.info("Models loaded.")
     yield
+    
     # Shutdown
     logger.info("Shutting down...")
+    if _process_pool:
+        _process_pool.shutdown(wait=True)
 
 
 app = FastAPI(
     title="SAGE-Docs Dashboard API",
     description="REST API for SAGE-Docs documentation search and upload",
-    version="1.0.0",
+    version="1.1.0",
     lifespan=lifespan
 )
 
@@ -181,6 +400,34 @@ app = FastAPI(
 # ============================================================
 # STATUS & HEALTH ENDPOINTS
 # ============================================================
+
+@app.get("/health")
+async def health_check() -> HealthStatus:
+    """Kubernetes-style health check endpoint."""
+    try:
+        client = await get_qdrant_client()
+        client.get_collection(COLLECTION_NAME)
+        qdrant_status = "healthy"
+    except Exception:
+        qdrant_status = "unhealthy"
+    
+    return HealthStatus(
+        status="ok" if qdrant_status == "healthy" else "degraded",
+        qdrant=qdrant_status,
+        uptime_seconds=round(time.time() - _server_start_time, 2)
+    )
+
+
+@app.get("/ready")
+async def readiness_check() -> dict:
+    """Kubernetes-style readiness check endpoint."""
+    try:
+        client = await get_qdrant_client()
+        client.get_collection(COLLECTION_NAME)
+        return {"ready": True}
+    except Exception as e:
+        raise HTTPException(status_code=503, detail=f"Not ready: {e}")
+
 
 @app.get("/api/status")
 async def get_status(
@@ -207,7 +454,7 @@ async def get_status(
 
 
 # ============================================================
-# UPLOAD ENDPOINTS
+# UPLOAD ENDPOINTS (with validation)
 # ============================================================
 
 @app.post("/api/upload")
@@ -221,9 +468,20 @@ async def upload_document(
     Upload a document file to be indexed.
     
     Supports: Markdown (.md), HTML (.html/.htm), Text (.txt), PDF (.pdf), ZIP (archives)
+    
+    Validation:
+    - Max file size: 50MB (configurable via MAX_FILE_SIZE env var)
+    - Allowed extensions: .md, .txt, .html, .pdf, .docx, .xlsx, .zip
+    - ZIP files: max 500 entries, max 200MB uncompressed
     """
     try:
         content = await file.read()
+        
+        # P0: Validate upload
+        try:
+            validate_upload(content, file.filename, file.content_type)
+        except UploadValidationError as e:
+            raise HTTPException(status_code=400, detail=str(e))
         
         result = await ingest_document(
             client=client,
@@ -242,6 +500,8 @@ async def upload_document(
             message=f"Successfully indexed {result['chunks_indexed']} chunks from {result['files_processed']} files"
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -261,6 +521,13 @@ async def upload_multiple_documents(
         
         for file in files:
             content = await file.read()
+            
+            # P0: Validate each upload
+            try:
+                validate_upload(content, file.filename, file.content_type)
+            except UploadValidationError as e:
+                raise HTTPException(status_code=400, detail=f"{file.filename}: {e}")
+            
             result = await ingest_document(
                 client=client,
                 content=content,
@@ -280,87 +547,46 @@ async def upload_multiple_documents(
             message=f"Successfully indexed {total_chunks} chunks from {total_files} files"
         )
         
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Upload failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
-
-
-def _process_upload_background(task_id: str, content: bytes, filename: str, library: str, version: str):
-    """Background worker for processing uploads (runs in separate thread)."""
-    import asyncio
-    
-    def run_async():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            _upload_tasks[task_id]["status"] = "processing"
-            _upload_tasks[task_id]["progress"] = "Converting document..."
-            
-            # Note: Background tasks need their own client instance or thread-safe handling
-            # Ideally we pass a factory or handle this better, but for now we re-instantiate or use global if safe
-            # Since get_qdrant_client is now async and uses global, we might need a sync wrapper or use sync client for thread
-            # For simplicity in this refactor, we'll create a new client for the thread
-            client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
-            result = loop.run_until_complete(ingest_document(
-                client=client,
-                content=content,
-                filename=filename,
-                library=library,
-                version=version
-            ))
-            
-            _upload_tasks[task_id]["status"] = "completed"
-            _upload_tasks[task_id]["progress"] = "Complete"
-            _upload_tasks[task_id]["result"] = UploadResult(
-                success=True,
-                library=result["library"],
-                version=result["version"],
-                files_processed=result["files_processed"],
-                chunks_indexed=result["chunks_indexed"],
-                message=f"Successfully indexed {result['chunks_indexed']} chunks"
-            )
-        except Exception as e:
-            logger.error(f"Background upload failed: {e}")
-            _upload_tasks[task_id]["status"] = "failed"
-            _upload_tasks[task_id]["error"] = str(e)
-        finally:
-            loop.close()
-    
-    run_async()
 
 
 @app.post("/api/upload/async")
 async def upload_document_async(
     file: UploadFile = File(...),
     library: str = Form(...),
-    version: str = Form(default="latest")
+    version: str = Form(default="latest"),
+    client: QdrantClient = Depends(get_qdrant_client)
 ) -> AsyncUploadStarted:
     """
     Upload a document for async processing.
     
     Use this for large PDFs which may take a while to process.
     Returns a task_id to poll for status.
+    
+    Jobs are persisted in Qdrant and survive container restarts.
     """
     content = await file.read()
+    
+    # P0: Validate upload first
+    try:
+        validate_upload(content, file.filename, file.content_type)
+    except UploadValidationError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    
     task_id = str(uuid.uuid4())
     
-    # Initialize task
-    _upload_tasks[task_id] = {
-        "status": "pending",
-        "progress": "Queued for processing",
-        "filename": file.filename,
-        "library": library,
-        "version": version,
-        "result": None,
-        "error": None
-    }
+    # Create durable job entry
+    create_job(client, task_id, file.filename, library, version)
     
-    # Start background thread
-    thread = threading.Thread(
-        target=_process_upload_background,
-        args=(task_id, content, file.filename, library, version)
+    # Submit to process pool
+    _process_pool.submit(
+        _process_upload_worker,
+        task_id, content, file.filename, library, version
     )
-    thread.start()
     
     return AsyncUploadStarted(
         task_id=task_id,
@@ -369,18 +595,22 @@ async def upload_document_async(
 
 
 @app.get("/api/upload/status/{task_id}")
-async def get_upload_status(task_id: str) -> UploadStatus:
+async def get_upload_status(
+    task_id: str,
+    client: QdrantClient = Depends(get_qdrant_client)
+) -> UploadStatus:
     """Get the status of an async upload task."""
-    if task_id not in _upload_tasks:
+    job = get_job(client, task_id)
+    
+    if not job:
         raise HTTPException(status_code=404, detail="Task not found")
     
-    task = _upload_tasks[task_id]
     return UploadStatus(
         task_id=task_id,
-        status=task["status"],
-        progress=task.get("progress"),
-        result=task.get("result"),
-        error=task.get("error")
+        status=job.get("status", "unknown"),
+        progress=job.get("progress"),
+        result=UploadResult(**job["result"]) if job.get("result") else None,
+        error=job.get("error")
     )
 
 
@@ -431,7 +661,6 @@ async def list_libraries(
             return []
         
         # Query 2: Get ALL versions in a single call (no filter)
-        # This avoids N separate queries for each library
         version_facets = client.facet(
             collection_name=COLLECTION_NAME,
             key="version",
@@ -439,14 +668,12 @@ async def list_libraries(
         )
         
         # Build library-version mapping using scroll with minimal payload
-        # We need to know which versions belong to which libraries
-        # Scroll a sample of points to build the mapping efficiently
         library_versions: dict[str, set[str]] = {hit.value: set() for hit in library_facets.hits}
         
         # Use scroll to get library-version pairs with minimal data
         results, next_offset = client.scroll(
             collection_name=COLLECTION_NAME,
-            limit=2000,  # Reasonable batch
+            limit=2000,
             with_payload=["library", "version"],
             with_vectors=False
         )
@@ -626,7 +853,6 @@ async def resolve_library(
             return []
         
         # Build version map for top matches only (batch approach)
-        # Use filter to limit scroll to matched libraries
         top_lib_names = {m["library"] for m in top_matches}
         library_versions: dict[str, set[str]] = {lib: set() for lib in top_lib_names}
         

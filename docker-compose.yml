@@ -18,11 +18,18 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./dashboard/static:/app/static
+      - ./sage_core:/app/sage_core
     environment:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - COLLECTION_NAME=sage_docs
+      - JOBS_COLLECTION=sage_jobs
       - UPLOAD_DIR=/app/uploads
+      # Upload constraints
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-52428800}
+      - MAX_ZIP_ENTRIES=${MAX_ZIP_ENTRIES:-500}
+      - MAX_ZIP_TOTAL_SIZE=${MAX_ZIP_TOTAL_SIZE:-209715200}
+      - WORKER_PROCESSES=${WORKER_PROCESSES:-2}
       # Embedding settings
       - EMBEDDING_MODE=local
       - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
@@ -33,7 +40,7 @@ services:
       - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
       - VLLM_API_KEY=${VLLM_API_KEY:-}
       # olmocr PDF processing (set OLMOCR_SERVER for remote instance)
-      - OLMOCR_SERVER=${OLMOCR_SERVER:-} # e.g., http://olmocr:8000/v1 or https://api.deepinfra.com/v1/openai
+      - OLMOCR_SERVER=${OLMOCR_SERVER:-}
       - OLMOCR_API_KEY=${OLMOCR_API_KEY:-}
       - OLMOCR_MODEL=${OLMOCR_MODEL:-allenai/olmOCR-2-7B-1025-FP8}
     mem_limit: 6g
