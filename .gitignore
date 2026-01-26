@@ -14,6 +14,9 @@ ENV/
 *.swp
 *.swo
 
+# Cache (kept in git)
+# .cache
+
 # Docker
 qdrant_storage/
 qdrant_data/
@@ -21,7 +24,6 @@ qdrant_data/
 
 # Uploads (if you want to ignore)
 uploads/
-
 # OS
 .DS_Store
 Thumbs.db

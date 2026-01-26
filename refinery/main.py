@@ -9,27 +9,40 @@ All ingestion logic has been consolidated into sage_core for consistency.
 
 import sys
 from pathlib import Path
+import os
 
-# Add sage_core to path
-SAGE_CORE_PATH = Path(__file__).parent.parent / "sage_core"
-if str(SAGE_CORE_PATH) not in sys.path:
-    sys.path.insert(0, str(SAGE_CORE_PATH))
+# Add project root (containing `sage_core` or `pyproject.toml`) to sys.path so imports work inside Docker
+def _add_project_root_to_path():
+    p = Path(__file__).resolve()
+    for _ in range(6):
+        if (p / "sage_core").exists() or (p / "pyproject.toml").exists():
+            root = p
+            sys.path.insert(0, str(root))
+            return
+        p = p.parent
+    # Fallback to current working directory
+    sys.path.insert(0, str(Path.cwd()))
+
+_add_project_root_to_path()
 
 import logging
+import time
 from typing import Optional
+
+from fastapi import FastAPI, UploadFile, File, Form, HTTPException
+import uvicorn
 
 from qdrant_client import QdrantClient
 
 # Import unified functions from sage_core
-from ingestion import ingest_document
-from qdrant_utils import (
+from sage_core import ingest_document
+from sage_core.qdrant_utils import (
     get_qdrant_client,
     ensure_collection,
     delete_library,
-    COLLECTION_NAME,
-    UPLOAD_DIR
+    COLLECTION_NAME
 )
-from file_processing import detect_file_type, process_file, process_zip
+from sage_core.file_processing import detect_file_type, process_file, process_zip
 
 # Configure logging
 logging.basicConfig(
@@ -37,6 +50,61 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger("SAGE-Refinery")
+
+# ============================================================
+# FASTAPI SERVICE (Minimal)
+# ============================================================
+
+_server_start_time = time.time()
+
+app = FastAPI(
+    title="SAGE-Docs Refinery",
+    description="Document ingestion service backed by sage_core",
+    version="1.0.0"
+)
+
+
+@app.on_event("startup")
+def _startup() -> None:
+    """Ensure Qdrant collection exists on startup."""
+    try:
+        client = get_qdrant_client()
+        ensure_collection(client)
+        logger.info("Refinery startup complete")
+    except Exception as exc:
+        logger.error(f"Refinery startup failed: {exc}")
+
+
+@app.get("/health")
+def health_check() -> dict:
+    """Health check endpoint."""
+    return {
+        "status": "ok",
+        "uptime_seconds": round(time.time() - _server_start_time, 2)
+    }
+
+
+@app.post("/ingest")
+async def ingest_endpoint(
+    library: str = Form(...),
+    version: str = Form("latest"),
+    file: UploadFile = File(...)
+) -> dict:
+    """Ingest a document via multipart upload."""
+    try:
+        content = await file.read()
+        client = get_qdrant_client()
+        result = await ingest_document_refinery(
+            content=content,
+            filename=file.filename or "uploaded_file",
+            library=library,
+            version=version,
+            client=client
+        )
+        return result
+    except Exception as exc:
+        logger.error(f"Refinery ingest failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc))
 
 
 # ============================================================
@@ -113,3 +181,7 @@ __all__ = [
     'get_qdrant_client',
     'ensure_collection'
 ]
+
+
+if __name__ == "__main__":
+    uvicorn.run(app, host="0.0.0.0", port=8080)

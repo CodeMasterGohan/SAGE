@@ -10,11 +10,21 @@ has been consolidated into sage_core for consistency.
 
 import sys
 from pathlib import Path
+import os
 
-# Add sage_core to path
-SAGE_CORE_PATH = Path(__file__).parent.parent / "sage_core"
-if str(SAGE_CORE_PATH) not in sys.path:
-    sys.path.insert(0, str(SAGE_CORE_PATH))
+# Add project root (containing `sage_core` or `pyproject.toml`) to sys.path so imports work inside Docker
+def _add_project_root_to_path():
+    p = Path(__file__).resolve()
+    for _ in range(6):
+        if (p / "sage_core").exists() or (p / "pyproject.toml").exists():
+            root = p
+            sys.path.insert(0, str(root))
+            return
+        p = p.parent
+    # Fallback to current working directory
+    sys.path.insert(0, str(Path.cwd()))
+
+_add_project_root_to_path()
 
 import os
 import logging
@@ -23,10 +33,10 @@ from typing import Optional
 from qdrant_client import QdrantClient
 
 # Import unified functions from sage_core
-from ingestion import ingest_document, save_uploaded_file
-from qdrant_utils import (
+from sage_core import ingest_document, save_uploaded_file
+from sage_core.qdrant_utils import (
     get_qdrant_client,
-    ensure_collection,
+    ensure_collection as core_ensure_collection,
     delete_library,
     COLLECTION_NAME
 )
@@ -126,7 +136,7 @@ async def ensure_collection_dashboard(client: QdrantClient) -> None:
     Wrapper around sage_core.qdrant_utils.ensure_collection
     for backwards compatibility.
     """
-    ensure_collection(client)
+    core_ensure_collection(client)
 
 
 # ============================================================
