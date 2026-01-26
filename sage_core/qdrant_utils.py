@@ -6,7 +6,7 @@ Shared Qdrant client management and collection operations.
 
 import os
 import logging
-from typing import Optional, List
+from typing import Optional
 
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
@@ -55,7 +55,7 @@ def ensure_collection(client: QdrantClient, collection_name: str = None) -> None
     - Payload indexes for library, version, file_path, type
     """
     name = collection_name or COLLECTION_NAME
-    
+
     if check_collection_exists(client, name):
         logger.debug(f"Collection {name} exists")
         return
@@ -89,7 +89,7 @@ def ensure_collection(client: QdrantClient, collection_name: str = None) -> None
             field_name=field,
             field_schema=models.PayloadSchemaType.KEYWORD
         )
-    
+
     logger.info(f"Collection {name} created successfully")
 
 
@@ -97,7 +97,7 @@ def ensure_jobs_collection(client: QdrantClient) -> None:
     """Create jobs collection for durable task state."""
     if check_collection_exists(client, JOBS_COLLECTION):
         return
-    
+
     logger.info(f"Creating jobs collection {JOBS_COLLECTION}...")
     # Jobs don't need vectors, just payload storage
     client.create_collection(
@@ -109,7 +109,7 @@ def ensure_jobs_collection(client: QdrantClient) -> None:
             )
         }
     )
-    
+
     # Create indexes for job queries
     for field in ["status", "library", "created_at"]:
         client.create_payload_index(
@@ -117,13 +117,13 @@ def ensure_jobs_collection(client: QdrantClient) -> None:
             field_name=field,
             field_schema=models.PayloadSchemaType.KEYWORD
         )
-    
+
     logger.info(f"Jobs collection {JOBS_COLLECTION} created")
 
 
 def delete_library(
-    client: QdrantClient, 
-    library: str, 
+    client: QdrantClient,
+    library: str,
     version: Optional[str] = None,
     collection_name: str = None
 ) -> int:
@@ -133,14 +133,14 @@ def delete_library(
     Returns number of chunks deleted.
     """
     name = collection_name or COLLECTION_NAME
-    
+
     filter_conditions = [
         models.FieldCondition(
             key="library",
             match=models.MatchValue(value=library)
         )
     ]
-    
+
     if version:
         filter_conditions.append(
             models.FieldCondition(
@@ -148,13 +148,13 @@ def delete_library(
                 match=models.MatchValue(value=version)
             )
         )
-    
+
     # Count before delete
     count_result = client.count(
         collection_name=name,
         count_filter=models.Filter(must=filter_conditions)
     )
-    
+
     # Delete from Qdrant
     client.delete(
         collection_name=name,
@@ -162,10 +162,10 @@ def delete_library(
             filter=models.Filter(must=filter_conditions)
         )
     )
-    
-    logger.info(f"Deleted {count_result.count} chunks for library {library}" + 
+
+    logger.info(f"Deleted {count_result.count} chunks for library {library}" +
                 (f" v{version}" if version else ""))
-    
+
     return count_result.count
 
 

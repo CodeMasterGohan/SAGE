@@ -7,7 +7,7 @@ Unified embedding model management for local and remote embeddings.
 import os
 import logging
 import asyncio
-from typing import Optional, List
+from typing import List
 
 import httpx
 
@@ -78,11 +78,11 @@ def get_http_client() -> httpx.AsyncClient:
 async def get_remote_embedding(text: str) -> List[float]:
     """Get embedding from remote vLLM server using persistent connection."""
     client = get_http_client()
-    
+
     headers = {"Content-Type": "application/json"}
     if VLLM_API_KEY:
         headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
-    
+
     response = await client.post(
         f"{VLLM_EMBEDDING_URL}/v1/embeddings",
         json={"input": [text], "model": VLLM_MODEL_NAME},

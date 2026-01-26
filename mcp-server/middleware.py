@@ -32,7 +32,7 @@ class SmartContextManager:
     - Explicit overrides: Allows agents to force a specific library.
     - Global escape hatch: Clears session on GLOBAL/wildcard requests.
     """
-    
+
     def __init__(self):
         # Maps session_id (or default) to last_active_library
         # Using a simple dict for now; in prod, use Redis or similar.
@@ -75,14 +75,14 @@ async def _fetch_known_libraries(get_client_fn, collection_name: str) -> List[st
     """
     client = get_client_fn()
     loop = asyncio.get_running_loop()
-    
+
     try:
         # Use simple faceting to get available libraries
         library_facets = await loop.run_in_executor(
             _executor,
             lambda: client.facet(
                 collection_name=collection_name,
-                key="library",  # SAGE uses "library" at top level payload? CHECK THIS. 
+                key="library",  # SAGE uses "library" at top level payload? CHECK THIS.
                                 # DRUID used "metadata.library". SAGE main.py uses "library".
                 limit=1000
             )
@@ -105,7 +105,7 @@ class AmbiguityHandler:
     - Hybrid alias resolution: hardcoded short aliases + dynamic prefix matching
     - Substring matching: "using react" -> detects "react"
     """
-    
+
     # Common library aliases (alias -> canonical name)
     # These handle short abbreviations that can't be inferred via prefix matching
     LIBRARY_ALIASES: Dict[str, str] = {
@@ -144,7 +144,7 @@ class AmbiguityHandler:
         Uses module-level cache to share across instances.
         """
         return await _fetch_known_libraries(
-            self._get_client, 
+            self._get_client,
             self._collection_name
         )
 
@@ -159,22 +159,22 @@ class AmbiguityHandler:
         """
         name_lower = name.lower()
         known_lower = {lib.lower(): lib for lib in known_libraries}
-        
+
         # Direct match
         if name_lower in known_lower:
             return known_lower[name_lower]
-        
+
         # Alias match
         if name_lower in self.LIBRARY_ALIASES:
             canonical = self.LIBRARY_ALIASES[name_lower]
             if canonical.lower() in known_lower:
                 return known_lower[canonical.lower()]
-        
+
         # Prefix/fuzzy match (e.g., "tailwind" matches "tailwindcss")
         for lib_lower, lib_original in known_lower.items():
             if lib_lower.startswith(name_lower) or name_lower.startswith(lib_lower):
                 return lib_original
-        
+
         return None
 
     async def detect_libraries(self, query: str) -> List[str]:
@@ -185,15 +185,15 @@ class AmbiguityHandler:
         query_lower = query.lower()
         known_libraries = await self._get_known_libraries()
         known_lower = {lib.lower(): lib for lib in known_libraries}
-        
+
         detected = set()  # Use set to avoid duplicates
-        
+
         try:
             # 1. Check for known library names in query
             for lib_lower, lib_original in known_lower.items():
                 if lib_lower in query_lower:
                     detected.add(lib_original)
-            
+
             # 2. Check for aliases in query
             for alias, canonical in self.LIBRARY_ALIASES.items():
                 if alias in query_lower:
@@ -201,7 +201,7 @@ class AmbiguityHandler:
                     resolved = self.resolve_alias(canonical, known_libraries)
                     if resolved:
                         detected.add(resolved)
-            
+
             return list(detected)
         except Exception as e:
             logger.error(f"Ambiguity detection failed: {e}")

@@ -211,7 +211,7 @@ def split_text_semantic(
     Split text into chunks with overlap, respecting code blocks and headers.
     """
     import re
-    
+
     # Handle code blocks specially
     code_block_pattern = r'(```[\s\S]*?```)'
     parts = re.split(code_block_pattern, text)
@@ -220,7 +220,7 @@ def split_text_semantic(
 
     for part in parts:
         is_code_block = part.startswith('```') and part.endswith('```')
-        
+
         if is_code_block:
             if len(part) > MAX_CHUNK_CHARS:
                 # Code block too large - split it
@@ -248,9 +248,9 @@ def split_text_semantic(
             for section in sections:
                 if not section.strip():
                     continue
-                    
+
                 is_header = section.strip().startswith('#')
-                
+
                 if is_header and current_chunk.strip():
                     chunks.append(current_chunk.strip())
                     current_chunk = section
@@ -279,7 +279,7 @@ def split_text_semantic(
                 safe_chunks.append(chunk[:MAX_CHUNK_CHARS - 20] + "\n[truncated]")
             else:
                 safe_chunks.append(chunk)
-    
+
     return safe_chunks
 
 
@@ -332,7 +332,7 @@ def ensure_collection(client: QdrantClient) -> None:
             field_name=field,
             field_schema=models.PayloadSchemaType.KEYWORD
         )
-    
+
     logger.info(f"Collection {COLLECTION_NAME} created")
 
 
@@ -365,77 +365,77 @@ async def process_document_async(
     """
     import time
     start_time = time.time()
-    
+
     # Ensure collection exists
     ensure_collection(client)
-    
+
     # Extract title if not provided
     if not title:
         import re
         match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
         title = match.group(1).strip() if match else Path(filename).stem
-    
+
     # Split into chunks
     chunks = split_text_semantic(content)
-    
+
     if not chunks:
         return {"chunks_indexed": 0, "duration_seconds": 0}
-    
+
     # Prepare chunk data
     chunks_data = [
         {"text": chunk, "index": i}
         for i, chunk in enumerate(chunks)
     ]
-    
+
     # Generate batches
     if EMBEDDING_MODE == "local":
         batch_size = 32
         chunk_batches = [chunks_data[i:i + batch_size] for i in range(0, len(chunks_data), batch_size)]
     else:
         chunk_batches = list(yield_safe_batches(chunks_data, max_tokens=MAX_BATCH_TOKENS))
-    
+
     logger.info(f"Processing {len(chunks)} chunks in {len(chunk_batches)} batches for {filename}")
-    
+
     # Get models
     sparse_model = get_sparse_model()
     dense_model_local = get_dense_model() if EMBEDDING_MODE == "local" else None
-    
+
     all_points = []
-    
+
     async with httpx.AsyncClient(
         limits=httpx.Limits(max_connections=CONCURRENCY_LIMIT * 2)
     ) as http_client:
-        
+
         for batch in chunk_batches:
             batch_texts = [item["text"] for item in batch]
-            
+
             # Prepare texts with prefix if needed
             if USE_NOMIC_PREFIX:
                 embed_texts = [f"search_document: {t}" for t in batch_texts]
             else:
                 embed_texts = batch_texts
-            
+
             # Generate dense embeddings
             if EMBEDDING_MODE == "remote":
                 dense_vecs = await get_remote_embeddings_async(http_client, embed_texts)
             else:
                 dense_vecs = list(dense_model_local.embed(embed_texts))
-            
+
             # Generate sparse embeddings
             sparse_vecs = list(sparse_model.embed(batch_texts))
-            
+
             # Create points
             for item, dense_vec, sparse_vec in zip(batch, dense_vecs, sparse_vecs):
                 chunk_text = item["text"]
                 chunk_index = item["index"]
-                
+
                 # Create unique ID
                 point_id = hashlib.md5(
                     f"{library}:{version}:{filename}:{chunk_index}:{chunk_text[:100]}".encode()
                 ).hexdigest()
-                
+
                 dense_list = dense_vec if isinstance(dense_vec, list) else dense_vec.tolist()
-                
+
                 point = models.PointStruct(
                     id=point_id,
                     vector={
@@ -457,7 +457,7 @@ async def process_document_async(
                     }
                 )
                 all_points.append(point)
-    
+
     # Upsert to Qdrant
     if all_points:
         client.upsert(
@@ -465,10 +465,10 @@ async def process_document_async(
             points=all_points,
             wait=True
         )
-    
+
     duration = time.time() - start_time
     logger.info(f"Indexed {len(all_points)} chunks for {filename} in {duration:.2f}s")
-    
+
     return {
         "chunks_indexed": len(all_points),
         "duration_seconds": round(duration, 2),
@@ -490,7 +490,7 @@ async def delete_document_async(
             match=models.MatchValue(value=library)
         )
     ]
-    
+
     if version:
         filter_conditions.append(
             models.FieldCondition(
@@ -498,7 +498,7 @@ async def delete_document_async(
                 match=models.MatchValue(value=version)
             )
         )
-    
+
     if file_path:
         filter_conditions.append(
             models.FieldCondition(
@@ -506,13 +506,13 @@ async def delete_document_async(
                 match=models.MatchValue(value=file_path)
             )
         )
-    
+
     # Count before delete
     count_result = client.count(
         collection_name=COLLECTION_NAME,
         count_filter=models.Filter(must=filter_conditions)
     )
-    
+
     # Delete
     client.delete(
         collection_name=COLLECTION_NAME,
@@ -520,6 +520,6 @@ async def delete_document_async(
             filter=models.Filter(must=filter_conditions)
         )
     )
-    
+
     logger.info(f"Deleted {count_result.count} chunks")
     return count_result.count

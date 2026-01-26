@@ -7,7 +7,7 @@ Semantic text chunking with token-aware batching.
 import os
 import re
 import logging
-from typing import Optional, List, Iterator
+from typing import List, Iterator
 
 logger = logging.getLogger("SAGE-Core")
 
@@ -118,7 +118,7 @@ def split_text_semantic(
 
     for part in parts:
         is_code_block = part.startswith('```') and part.endswith('```')
-        
+
         if is_code_block:
             if len(part) > MAX_CHUNK_CHARS:
                 # Code block too large - split it
@@ -146,9 +146,9 @@ def split_text_semantic(
             for section in sections:
                 if not section.strip():
                     continue
-                    
+
                 is_header = section.strip().startswith('#')
-                
+
                 if is_header and current_chunk.strip():
                     chunks.append(current_chunk.strip())
                     current_chunk = section
@@ -177,5 +177,5 @@ def split_text_semantic(
                 safe_chunks.append(chunk[:MAX_CHUNK_CHARS - 20] + "\n[truncated]")
             else:
                 safe_chunks.append(chunk)
-    
+
     return safe_chunks

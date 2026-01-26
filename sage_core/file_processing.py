@@ -13,7 +13,7 @@ import subprocess
 import shutil
 import tempfile
 from pathlib import Path
-from typing import Optional, List, Tuple
+from typing import List, Tuple
 
 logger = logging.getLogger("SAGE-Core")
 
@@ -40,7 +40,7 @@ except ImportError:
 def detect_file_type(filename: str, content: bytes) -> str:
     """Detect file type based on extension and content."""
     ext = Path(filename).suffix.lower()
-    
+
     if ext in ['.md', '.markdown']:
         return 'markdown'
     elif ext in ['.html', '.htm']:
@@ -65,7 +65,7 @@ def detect_file_type(filename: str, content: bytes) -> str:
                 return 'html'
             elif text.startswith('---\n') or re.search(r'^#\s+\w', text, re.MULTILINE):
                 return 'markdown'
-        except:
+        except Exception:
             pass
         return 'text'
 
@@ -74,21 +74,21 @@ def convert_html_to_markdown(html_content: str) -> str:
     """Convert HTML to clean Markdown."""
     from markdownify import markdownify as md
     from bs4 import BeautifulSoup
-    
+
     # Clean up with BeautifulSoup first
     soup = BeautifulSoup(html_content, 'html.parser')
-    
+
     # Remove script and style elements
     for script in soup(["script", "style", "nav", "footer", "header"]):
         script.decompose()
-    
+
     # Convert to markdown
     markdown = md(
         str(soup),
         heading_style="atx",
         code_language_callback=lambda el: el.get('data-language') or el.get('class', [''])[0] if el.get('class') else ''
     )
-    
+
     return markdown.strip()
 
 
@@ -99,25 +99,25 @@ def extract_pdf_text(pdf_content: bytes) -> str:
         with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
             tmp.write(pdf_content)
             tmp_path = tmp.name
-        
+
         # Create workspace for olmocr output
         workspace = tempfile.mkdtemp(prefix="olmocr_")
-        
+
         logger.info("Converting PDF with olmocr (this may take a while)...")
-        
+
         # Build command
         cmd = [
             "python", "-m", "olmocr.pipeline", workspace,
             "--markdown", "--pdfs", tmp_path,
             "--model", OLMOCR_MODEL
         ]
-        
+
         # Add server/API configuration if provided
         if OLMOCR_SERVER:
             cmd.extend(["--server", OLMOCR_SERVER])
         if OLMOCR_API_KEY:
             cmd.extend(["--api_key", OLMOCR_API_KEY])
-        
+
         # Run olmocr pipeline with timeout
         result = subprocess.run(
             cmd,
@@ -125,26 +125,26 @@ def extract_pdf_text(pdf_content: bytes) -> str:
             text=True,
             timeout=PDF_TIMEOUT
         )
-        
+
         if result.returncode != 0:
             logger.error(f"olmocr failed: {result.stderr}")
             return ""
-        
+
         # Read generated markdown
         pdf_stem = Path(tmp_path).stem
         md_file = Path(workspace) / "markdown" / f"{pdf_stem}.md"
-        
+
         if md_file.exists():
             markdown = md_file.read_text()
             logger.info(f"PDF conversion complete: {len(markdown)} chars")
         else:
             logger.warning(f"olmocr did not produce markdown output for {tmp_path}")
             markdown = ""
-        
+
         # Clean up
         os.remove(tmp_path)
         shutil.rmtree(workspace, ignore_errors=True)
-        
+
         return markdown
     except subprocess.TimeoutExpired:
         logger.error("olmocr timed out processing PDF")
@@ -159,11 +159,11 @@ def extract_docx_text(docx_content: bytes) -> str:
     if not DOCX_AVAILABLE:
         logger.warning("python-docx not available, skipping DOCX extraction")
         return ""
-    
+
     try:
         doc = DocxDocument(io.BytesIO(docx_content))
         text_parts = []
-        
+
         for para in doc.paragraphs:
             if para.text.strip():
                 # Check if it's a heading
@@ -172,11 +172,11 @@ def extract_docx_text(docx_content: bytes) -> str:
                     try:
                         level = int(level)
                         text_parts.append(f"{'#' * level} {para.text}")
-                    except:
+                    except Exception:
                         text_parts.append(f"## {para.text}")
                 else:
                     text_parts.append(para.text)
-        
+
         # Also extract text from tables
         for table in doc.tables:
             rows = []
@@ -185,7 +185,7 @@ def extract_docx_text(docx_content: bytes) -> str:
                 rows.append(' | '.join(cells))
             if rows:
                 text_parts.append('\n'.join(rows))
-        
+
         return '\n\n'.join(text_parts)
     except Exception as e:
         logger.error(f"Error extracting DOCX: {e}")
@@ -197,25 +197,25 @@ def extract_excel_text(excel_content: bytes) -> str:
     if not EXCEL_AVAILABLE:
         logger.warning("openpyxl not available, skipping Excel extraction")
         return ""
-    
+
     try:
         wb = openpyxl.load_workbook(io.BytesIO(excel_content), data_only=True)
         text_parts = []
-        
+
         for sheet_name in wb.sheetnames:
             sheet = wb[sheet_name]
             text_parts.append(f"## {sheet_name}")
-            
+
             rows = []
             for row in sheet.iter_rows(values_only=True):
                 # Convert None to empty string and join
                 cells = [str(cell) if cell is not None else '' for cell in row]
                 if any(cells):  # Only add non-empty rows
                     rows.append(' | '.join(cells))
-            
+
             if rows:
                 text_parts.append('\n'.join(rows))
-        
+
         return '\n\n'.join(text_parts)
     except Exception as e:
         logger.error(f"Error extracting Excel: {e}")
@@ -225,12 +225,7 @@ def extract_excel_text(excel_content: bytes) -> str:
 def extract_title_from_content(content: str, filename: str) -> str:
     """Extract title from content or use filename."""
     import yaml
-    
-    # Try to find markdown header
-    match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
-    if match:
-        return match.group(1).strip()
-    
+
     # Try YAML frontmatter
     if content.startswith('---'):
         try:
@@ -239,9 +234,14 @@ def extract_title_from_content(content: str, filename: str) -> str:
                 frontmatter = yaml.safe_load(content[3:end])
                 if isinstance(frontmatter, dict) and 'title' in frontmatter:
                     return frontmatter['title']
-        except:
+        except Exception:
             pass
-    
+
+    # Try to find markdown header
+    match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+    if match:
+        return match.group(1).strip()
+
     # Use filename without extension
     return Path(filename).stem.replace('_', ' ').replace('-', ' ').title()
 
@@ -256,7 +256,7 @@ def process_file(
     Process a single file and return its markdown content.
     """
     file_type = detect_file_type(filename, content)
-    
+
     if file_type == 'markdown':
         return content.decode('utf-8', errors='ignore')
     elif file_type == 'html':
@@ -290,26 +290,26 @@ def process_zip(
         max_entries: Maximum number of files to process (safety limit)
     """
     files = []
-    
+
     try:
         with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zf:
             entries = zf.namelist()
-            
+
             # Enforce entry limit
             if len(entries) > max_entries:
                 logger.warning(f"ZIP has {len(entries)} entries, limiting to {max_entries}")
                 entries = entries[:max_entries]
-            
+
             for name in entries:
                 # Skip directories and hidden files
                 if name.endswith('/') or '/.' in name or name.startswith('.'):
                     continue
-                
+
                 # Skip non-document files
                 ext = Path(name).suffix.lower()
                 if ext not in ['.md', '.markdown', '.html', '.htm', '.txt', '.pdf', '.rst', '.docx', '.xlsx', '.xls']:
                     continue
-                
+
                 try:
                     content = zf.read(name)
                     markdown = process_file(content, name, library, version)
@@ -319,5 +319,5 @@ def process_zip(
                     logger.warning(f"Error processing {name} in ZIP: {e}")
     except Exception as e:
         logger.error(f"Error reading ZIP file: {e}")
-    
+
     return files

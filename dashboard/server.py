@@ -33,8 +33,7 @@ from fastembed import TextEmbedding, SparseTextEmbedding
 # Add sage_core to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from sage_core.validation import validate_upload, UploadValidationError, MAX_FILE_SIZE
-from sage_core.qdrant_utils import ensure_collection, delete_library as core_delete_library, COLLECTION_NAME as CORE_COLLECTION
+from sage_core.validation import validate_upload, UploadValidationError
 
 # Keep ingest for now, will be migrated to sage_core in future
 from ingest import ingest_document, delete_library, ensure_collection as legacy_ensure_collection
@@ -202,7 +201,7 @@ def ensure_jobs_collection(client: QdrantClient) -> None:
         return  # Already exists
     except Exception:
         pass
-    
+
     logger.info(f"Creating jobs collection {JOBS_COLLECTION}...")
     client.create_collection(
         collection_name=JOBS_COLLECTION,
@@ -213,7 +212,7 @@ def ensure_jobs_collection(client: QdrantClient) -> None:
             )
         }
     )
-    
+
     # Create indexes for job queries
     for field in ["status", "library", "created_at"]:
         try:
@@ -224,7 +223,7 @@ def ensure_jobs_collection(client: QdrantClient) -> None:
             )
         except Exception:
             pass  # Index may already exist
-    
+
     logger.info(f"Jobs collection {JOBS_COLLECTION} created")
 
 
@@ -279,9 +278,9 @@ def get_job(client: QdrantClient, task_id: str) -> Optional[dict]:
 def cleanup_old_jobs(client: QdrantClient, max_age_hours: int = 24) -> int:
     """Clean up old completed/failed jobs."""
     from datetime import datetime, timedelta
-    
+
     cutoff = (datetime.utcnow() - timedelta(hours=max_age_hours)).isoformat()
-    
+
     try:
         # Delete old completed jobs
         client.delete(
@@ -315,14 +314,14 @@ def _process_upload_worker(task_id: str, content: bytes, filename: str, library:
     Returns a dict with the result or error.
     """
     import asyncio
-    
+
     # Create new client for this process
     client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
-    
+
     try:
         # Update job status
         update_job(client, task_id, status="processing", progress="Converting document...")
-        
+
         # Run the async ingest in a new event loop
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
@@ -336,7 +335,7 @@ def _process_upload_worker(task_id: str, content: bytes, filename: str, library:
             ))
         finally:
             loop.close()
-        
+
         # Update job with success
         update_job(
             client, task_id,
@@ -351,9 +350,9 @@ def _process_upload_worker(task_id: str, content: bytes, filename: str, library:
                 "message": f"Successfully indexed {result['chunks_indexed']} chunks"
             }
         )
-        
+
         return {"success": True, "result": result}
-        
+
     except Exception as e:
         logger.error(f"Background upload failed: {e}")
         update_job(client, task_id, status="failed", error=str(e))
@@ -364,7 +363,7 @@ def _process_upload_worker(task_id: str, content: bytes, filename: str, library:
 async def lifespan(app: FastAPI):
     """Lifespan handler for startup/shutdown."""
     global _process_pool
-    
+
     # Startup: preload models and ensure collections
     logger.info("Preloading models...")
     await get_dense_model()
@@ -372,17 +371,17 @@ async def lifespan(app: FastAPI):
     client = await get_qdrant_client()
     await legacy_ensure_collection(client)
     ensure_jobs_collection(client)
-    
+
     # Initialize process pool
     _process_pool = ProcessPoolExecutor(max_workers=WORKER_PROCESSES)
     logger.info(f"Process pool initialized with {WORKER_PROCESSES} workers")
-    
+
     # Clean up old jobs on startup
     cleanup_old_jobs(client)
-    
+
     logger.info("Models loaded.")
     yield
-    
+
     # Shutdown
     logger.info("Shutting down...")
     if _process_pool:
@@ -410,7 +409,7 @@ async def health_check() -> HealthStatus:
         qdrant_status = "healthy"
     except Exception:
         qdrant_status = "unhealthy"
-    
+
     return HealthStatus(
         status="ok" if qdrant_status == "healthy" else "degraded",
         qdrant=qdrant_status,
@@ -476,13 +475,13 @@ async def upload_document(
     """
     try:
         content = await file.read()
-        
+
         # P0: Validate upload
         try:
             validate_upload(content, file.filename, file.content_type)
         except UploadValidationError as e:
             raise HTTPException(status_code=400, detail=str(e))
-        
+
         result = await ingest_document(
             client=client,
             content=content,
@@ -490,7 +489,7 @@ async def upload_document(
             library=library,
             version=version
         )
-        
+
         return UploadResult(
             success=True,
             library=result["library"],
@@ -499,7 +498,7 @@ async def upload_document(
             chunks_indexed=result["chunks_indexed"],
             message=f"Successfully indexed {result['chunks_indexed']} chunks from {result['files_processed']} files"
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -518,16 +517,16 @@ async def upload_multiple_documents(
     try:
         total_files = 0
         total_chunks = 0
-        
+
         for file in files:
             content = await file.read()
-            
+
             # P0: Validate each upload
             try:
                 validate_upload(content, file.filename, file.content_type)
             except UploadValidationError as e:
                 raise HTTPException(status_code=400, detail=f"{file.filename}: {e}")
-            
+
             result = await ingest_document(
                 client=client,
                 content=content,
@@ -537,7 +536,7 @@ async def upload_multiple_documents(
             )
             total_files += result["files_processed"]
             total_chunks += result["chunks_indexed"]
-        
+
         return UploadResult(
             success=True,
             library=library,
@@ -546,7 +545,7 @@ async def upload_multiple_documents(
             chunks_indexed=total_chunks,
             message=f"Successfully indexed {total_chunks} chunks from {total_files} files"
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:
@@ -570,27 +569,27 @@ async def upload_document_async(
     Jobs are persisted in Qdrant and survive container restarts.
     """
     content = await file.read()
-    
+
     # P0: Validate upload first
     try:
         validate_upload(content, file.filename, file.content_type)
     except UploadValidationError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    
+
     task_id = str(uuid.uuid4())
-    
+
     # Create durable job entry
     create_job(client, task_id, file.filename, library, version)
-    
+
     # Submit to process pool
     _process_pool.submit(
         _process_upload_worker,
         task_id, content, file.filename, library, version
     )
-    
+
     return AsyncUploadStarted(
         task_id=task_id,
-        message=f"Upload queued. PDF files may take a while to process. You can close this page."
+        message="Upload queued. PDF files may take a while to process. You can close this page."
     )
 
 
@@ -601,10 +600,10 @@ async def get_upload_status(
 ) -> UploadStatus:
     """Get the status of an async upload task."""
     job = get_job(client, task_id)
-    
+
     if not job:
         raise HTTPException(status_code=404, detail="Task not found")
-    
+
     return UploadStatus(
         task_id=task_id,
         status=job.get("status", "unknown"),
@@ -616,21 +615,21 @@ async def get_upload_status(
 
 @app.delete("/api/library/{library}")
 async def remove_library(
-    library: str, 
+    library: str,
     version: Optional[str] = None,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DeleteResult:
     """Delete a library (and optionally specific version) from the index."""
     try:
         deleted_count = await delete_library(client, library, version)
-        
+
         return DeleteResult(
             success=True,
             library=library,
             version=version,
             chunks_deleted=deleted_count
         )
-        
+
     except Exception as e:
         logger.error(f"Delete failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -648,7 +647,7 @@ async def list_libraries(
     
     Optimized: Uses 2 facet queries instead of N+1 (one per library).
     """
-    
+
     try:
         # Query 1: Get all unique libraries
         library_facets = client.facet(
@@ -656,20 +655,20 @@ async def list_libraries(
             key="library",
             limit=1000
         )
-        
+
         if not library_facets.hits:
             return []
-        
+
         # Query 2: Get ALL versions in a single call (no filter)
         version_facets = client.facet(
             collection_name=COLLECTION_NAME,
             key="version",
             limit=1000
         )
-        
+
         # Build library-version mapping using scroll with minimal payload
         library_versions: dict[str, set[str]] = {hit.value: set() for hit in library_facets.hits}
-        
+
         # Use scroll to get library-version pairs with minimal data
         results, next_offset = client.scroll(
             collection_name=COLLECTION_NAME,
@@ -677,13 +676,13 @@ async def list_libraries(
             with_payload=["library", "version"],
             with_vectors=False
         )
-        
+
         for point in results:
             lib = point.payload.get("library")
             ver = point.payload.get("version")
             if lib in library_versions and ver:
                 library_versions[lib].add(ver)
-        
+
         # While there are more results, continue scrolling
         while next_offset and len(results) == 2000:
             results, next_offset = client.scroll(
@@ -698,7 +697,7 @@ async def list_libraries(
                 ver = point.payload.get("version")
                 if lib in library_versions and ver:
                     library_versions[lib].add(ver)
-        
+
         # Build result
         result = []
         for hit in library_facets.hits:
@@ -708,9 +707,9 @@ async def list_libraries(
                 library=lib_name,
                 versions=versions
             ))
-        
+
         return sorted(result, key=lambda x: x.library)
-        
+
     except Exception as e:
         logger.error(f"Failed to list libraries: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -724,14 +723,14 @@ async def search_docs(
     dense_model: TextEmbedding = Depends(get_dense_model)
 ) -> list[SearchResult]:
     """Search documentation using hybrid semantic + keyword search."""
-    
+
     # Apply Nomic prefix if needed
     query_for_embed = f"search_query: {request.query}" if USE_NOMIC_PREFIX else request.query
-    
+
     # Generate embeddings
     dense_vector = list(dense_model.embed([query_for_embed]))[0].tolist()
     sparse_embedding = list(bm25_model.embed([request.query]))[0]
-    
+
     # Build filter conditions
     filter_conditions = []
     if request.library:
@@ -748,14 +747,14 @@ async def search_docs(
                 match=models.MatchValue(value=request.version)
             )
         )
-    
+
     search_filter = None
     if filter_conditions:
         search_filter = models.Filter(must=filter_conditions)
-    
+
     # Select fusion method
     fusion_type = models.Fusion.DBSF if request.fusion.lower() == "dbsf" else models.Fusion.RRF
-    
+
     try:
         results = client.query_points(
             collection_name=COLLECTION_NAME,
@@ -779,7 +778,7 @@ async def search_docs(
             limit=request.limit,
             with_payload=True
         )
-        
+
         formatted = []
         for point in results.points:
             payload = point.payload
@@ -792,9 +791,9 @@ async def search_docs(
                 file_path=payload.get("file_path", ""),
                 score=point.score
             ))
-        
+
         return formatted
-        
+
     except Exception as e:
         logger.error(f"Search failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -810,7 +809,7 @@ async def resolve_library(
     Optimized: Fetches versions for top matches in a single scroll query.
     """
     query_lower = request.query.lower()
-    
+
     try:
         # Get all libraries using facet API
         library_facets = client.facet(
@@ -818,13 +817,13 @@ async def resolve_library(
             key="library",
             limit=1000
         )
-        
+
         # Score all libraries
         scored = []
         for hit in library_facets.hits:
             lib_name = hit.value
             doc_count = hit.count
-            
+
             name_lower = lib_name.lower()
             if name_lower == query_lower:
                 score = 1.0
@@ -837,25 +836,25 @@ async def resolve_library(
                 name_words = set(name_lower.replace('-', ' ').replace('_', ' ').split())
                 overlap = query_words & name_words
                 score = len(overlap) / max(len(query_words), 1) * 0.5
-            
+
             if score > 0:
                 scored.append({
                     "library": lib_name,
                     "doc_count": doc_count,
                     "relevance_score": round(score, 2)
                 })
-        
+
         # Sort and take top N
         scored.sort(key=lambda x: (-x["relevance_score"], -x["doc_count"]))
         top_matches = scored[:request.limit]
-        
+
         if not top_matches:
             return []
-        
+
         # Build version map for top matches only (batch approach)
         top_lib_names = {m["library"] for m in top_matches}
         library_versions: dict[str, set[str]] = {lib: set() for lib in top_lib_names}
-        
+
         # Single scroll query with filter for matched libraries
         scroll_filter = models.Filter(
             should=[
@@ -866,7 +865,7 @@ async def resolve_library(
                 for lib_name in top_lib_names
             ]
         )
-        
+
         results, next_offset = client.scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=scroll_filter,
@@ -874,13 +873,13 @@ async def resolve_library(
             with_payload=["library", "version"],
             with_vectors=False
         )
-        
+
         for point in results:
             lib = point.payload.get("library")
             ver = point.payload.get("version")
             if lib in library_versions and ver:
                 library_versions[lib].add(ver)
-        
+
         # Build final results
         results = []
         for match in top_matches:
@@ -892,9 +891,9 @@ async def resolve_library(
                 relevance_score=match["relevance_score"],
                 versions=versions
             ))
-        
+
         return results
-        
+
     except Exception as e:
         logger.error(f"Failed to resolve library: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -906,7 +905,7 @@ async def get_document(
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DocumentResult:
     """Get the full content of a specific document by its file path."""
-    
+
     try:
         results, _ = client.scroll(
             collection_name=COLLECTION_NAME,
@@ -921,14 +920,14 @@ async def get_document(
             limit=100,
             with_payload=True
         )
-        
+
         if not results:
             raise HTTPException(status_code=404, detail=f"Document not found: {file_path}")
-        
+
         chunks = sorted(results, key=lambda p: p.payload.get("chunk_index", 0))
         full_content = "\n\n".join(p.payload.get("content", "") for p in chunks)
         first_payload = chunks[0].payload
-        
+
         return DocumentResult(
             title=first_payload.get("title", ""),
             library=first_payload.get("library", "unknown"),
@@ -937,7 +936,7 @@ async def get_document(
             content=full_content,
             chunk_count=len(chunks)
         )
-        
+
     except HTTPException:
         raise
     except Exception as e:

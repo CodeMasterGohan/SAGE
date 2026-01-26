@@ -29,7 +29,7 @@ from qdrant_client.http import models
 from fastembed import TextEmbedding, SparseTextEmbedding
 
 # Local Modules
-from middleware import SmartContextManager, AmbiguityHandler, context_manager
+from middleware import AmbiguityHandler, context_manager
 from search import perform_search_workflow
 
 # Configure logging
@@ -141,7 +141,7 @@ async def get_remote_embedding(text: str) -> list[float]:
     headers = {"Content-Type": "application/json"}
     if VLLM_API_KEY:
         headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
-    
+
     try:
         response = await client.post(
             f"{VLLM_EMBEDDING_URL}/v1/embeddings",
@@ -213,7 +213,7 @@ async def search_docs(
     """
     start_time = time.time()
     session_id = "default"  # Future: Extract from request context
-    
+
     meta = {
         "query": query,
         "original_library_arg": library,
@@ -221,37 +221,37 @@ async def search_docs(
         "ambiguity_detected": [],
         "latency_ms": 0
     }
-    
+
     target_libraries = []
     ambiguity_handler = get_ambiguity_handler()
-    
+
     # 1. Resolve Context
     # Case A: Explicit Global
     if library in ["*", "GLOBAL"]:
         target_libraries = [None]
         meta["resolution_method"] = "explicit_global"
         context_manager.clear_context(session_id)
-        
+
     # Case B: Explicit Library
     elif library:
         # Resolve aliases
         known_libs = await ambiguity_handler._get_known_libraries()
         resolved_lib = ambiguity_handler.resolve_alias(library, known_libs)
-        
+
         if resolved_lib:
             target_libraries = [resolved_lib]
             if resolved_lib != library:
                 meta["alias_resolved"] = f"{library} -> {resolved_lib}"
         else:
             target_libraries = [library]
-        
+
         meta["resolution_method"] = "explicit_arg"
         context_manager.update_context(target_libraries[0], session_id)
-        
+
     # Case C: Automatic Resolution
     else:
         detected_libs = await ambiguity_handler.detect_libraries(query)
-        
+
         if len(detected_libs) > 1:
             target_libraries = detected_libs
             meta["resolution_method"] = "ambiguity_multi_search"
@@ -269,27 +269,27 @@ async def search_docs(
             else:
                 target_libraries = [None] # Global fallback
                 meta["resolution_method"] = "default_global"
-    
+
     meta["active_context"] = target_libraries
-    
+
     # 2. Execute Search
     tasks = [
         _do_search(query=query, library=lib_target, version=version, limit=limit, rerank=rerank, fusion=fusion)
         for lib_target in target_libraries
     ]
-    
+
     results_lists = await asyncio.gather(*tasks)
-    
+
     final_results = []
     for r_list in results_lists:
         final_results.extend(r_list)
-        
+
     if len(target_libraries) > 1:
         final_results.sort(key=lambda x: x["score"], reverse=True)
         final_results = final_results[:limit]
-        
+
     # 3. Fallback
-    if not final_results and all(l is not None for l in target_libraries):
+    if not final_results and all(lib is not None for lib in target_libraries):
         logger.info("Targeted search failed. Attempting global fallback.")
         fallback_results = await _do_search(
             query=query, library=None, version=None, limit=limit, rerank=rerank, fusion=fusion
@@ -299,9 +299,9 @@ async def search_docs(
                 res["search_note"] = "Global Fallback (Targeted search returned no results)"
             final_results = fallback_results
             meta["resolution_method"] += "_fallback_to_global"
-            
+
     meta["latency_ms"] = int((time.time() - start_time) * 1000)
-    
+
     return {
         "results": final_results,
         "meta": meta
@@ -319,12 +319,12 @@ async def resolve_library(query: str, limit: int = 5) -> list[dict]:
     # Note: We could use AmbiguityHandler here, but SAGE's scoring is nicer for UI/Human use.
     client = get_qdrant_client()
     query_lower = query.lower()
-    
+
     try:
-        # We need to run this in executor because QdrantClient is sync (mostly) 
-        # but here we use the sync methods directly. 
+        # We need to run this in executor because QdrantClient is sync (mostly)
+        # but here we use the sync methods directly.
         # Wait, FastMCP tools can be async.
-        
+
         # Facet query
         loop = asyncio.get_running_loop()
         library_facets = await loop.run_in_executor(
@@ -335,13 +335,13 @@ async def resolve_library(query: str, limit: int = 5) -> list[dict]:
                 limit=1000
             )
         )
-        
+
         scored = []
         for hit in library_facets.hits:
             lib_name = hit.value
             doc_count = hit.count
             name_lower = lib_name.lower()
-            
+
             if name_lower == query_lower:
                 score = 1.0
             elif query_lower in name_lower:
@@ -353,31 +353,31 @@ async def resolve_library(query: str, limit: int = 5) -> list[dict]:
                 name_words = set(name_lower.replace('-', ' ').replace('_', ' ').split())
                 overlap = query_words & name_words
                 score = len(overlap) / max(len(query_words), 1) * 0.5
-            
+
             if score > 0:
                 scored.append({
                     "library": lib_name,
                     "doc_count": doc_count,
                     "relevance_score": round(score, 2)
                 })
-        
+
         scored.sort(key=lambda x: (-x["relevance_score"], -x["doc_count"]))
         top_matches = scored[:limit]
-        
+
         if not top_matches:
             return []
-            
+
         # Get versions for top matches
         top_lib_names = {m["library"] for m in top_matches}
         library_versions = {lib: set() for lib in top_lib_names}
-        
+
         scroll_filter = models.Filter(
             should=[
                 models.FieldCondition(key="library", match=models.MatchValue(value=lib_name))
                 for lib_name in top_lib_names
             ]
         )
-        
+
         # Scroll in executor
         results, _ = await loop.run_in_executor(
             None,
@@ -389,19 +389,19 @@ async def resolve_library(query: str, limit: int = 5) -> list[dict]:
                 with_vectors=False
             )
         )
-        
+
         for point in results:
             lib = point.payload.get("library")
             ver = point.payload.get("version")
             if lib in library_versions and ver:
                 library_versions[lib].add(ver)
-                
+
         for match in top_matches:
             lib_name = match["library"]
             match["versions"] = sorted(library_versions.get(lib_name, set()), reverse=True)[:10]
-            
+
         return top_matches
-        
+
     except Exception as e:
         logger.error(f"Failed to resolve library: {e}")
         return [{"error": str(e)}]
@@ -412,7 +412,7 @@ async def list_libraries() -> list[dict]:
     """List all indexed libraries and their versions."""
     client = get_qdrant_client()
     loop = asyncio.get_running_loop()
-    
+
     try:
         # 1. Get unique libraries
         library_facets = await loop.run_in_executor(
@@ -423,13 +423,13 @@ async def list_libraries() -> list[dict]:
                 limit=1000
             )
         )
-        
+
         if not library_facets.hits:
             return []
-            
+
         # 2. Get versions via scroll (optimized)
         library_versions = {hit.value: set() for hit in library_facets.hits}
-        
+
         # Helper for scrolling
         def _get_all_versions():
             all_results = []
@@ -448,13 +448,13 @@ async def list_libraries() -> list[dict]:
             return all_results
 
         results = await loop.run_in_executor(None, _get_all_versions)
-        
+
         for point in results:
             lib = point.payload.get("library")
             ver = point.payload.get("version")
             if lib in library_versions and ver:
                 library_versions[lib].add(ver)
-                
+
         # 3. Format
         final_list = []
         for hit in library_facets.hits:
@@ -464,7 +464,7 @@ async def list_libraries() -> list[dict]:
                 "library": lib_name,
                 "versions": versions
             })
-            
+
         return sorted(final_list, key=lambda x: x["library"])
 
     except Exception as e:
@@ -476,7 +476,7 @@ async def list_libraries() -> list[dict]:
 def get_document(file_path: str) -> dict:
     """Get the full content of a specific document by its file path."""
     client = get_qdrant_client()
-    
+
     try:
         results, _ = client.scroll(
             collection_name=COLLECTION_NAME,
@@ -486,13 +486,13 @@ def get_document(file_path: str) -> dict:
             limit=100,
             with_payload=True
         )
-        
+
         if not results:
             return {"error": f"Document not found: {file_path}"}
-        
+
         chunks = sorted(results, key=lambda p: p.payload.get("chunk_index", 0))
         full_content = "\n\n".join(p.payload.get("content", "") for p in chunks)
-        
+
         first_payload = chunks[0].payload
         return {
             "title": first_payload.get("title", ""),
@@ -513,12 +513,12 @@ def main():
     parser.add_argument("--port", "-p", type=int, default=8000)
     parser.add_argument("--preload", action="store_true")
     args = parser.parse_args()
-    
+
     if args.preload:
         logger.info("Preloading models...")
         get_dense_model()
         get_bm25_model()
-    
+
     if args.transport == "http":
         import uvicorn
         logger.info(f"Starting SAGE-Docs MCP server on HTTP port {args.port}")
