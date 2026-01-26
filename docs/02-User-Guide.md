@@ -90,6 +90,15 @@ SAGE-Docs can process:
 | **Word** | `.docx` | Extracts text with heading structure |
 | **Excel** | `.xlsx`, `.xls` | Converts sheets to searchable text |
 | **Archives** | `.zip` | Extracts and processes all docs inside |
+| **Allowed Exts** | .md, .txt, .html, .pdf, .docx, .xlsx, .zip | All others are rejected |
+
+### Upload Constraints
+
+To ensure system stability, the following limits apply:
+- **Max File Size**: 50 MB per file
+- **ZIP Limits**: Max 500 files per archive, 200 MB total uncompressed size
+- **Empty Files**: Rejected automatically
+
 
 ### Step-by-Step Upload
 

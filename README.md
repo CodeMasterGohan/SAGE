@@ -7,6 +7,7 @@ A documentation search system similar to DRUID, but with **web-based document up
 ## Features
 
 - **📤 Web Upload**: Drag & drop or browse to upload documentation files
+- **🛡️ Secure Processing**: Validation, sandboxing, and durable job queuing
 - **🔍 Hybrid Search**: Semantic + keyword search with DBSF/RRF fusion
 - **📚 Multi-Library**: Organize docs by library and version
 - **🤖 MCP Server**: Expose search to LLMs via Model Context Protocol
@@ -26,13 +27,14 @@ open http://localhost:8080
 
 ```
 SAGE-Docs/
-├── backend/           # FastAPI server with upload + search APIs
-│   ├── server.py      # REST API endpoints
-│   └── ingest.py      # Document processing pipeline
-├── mcp-server/        # MCP server for LLM integration
-│   └── main.py        # MCP tools (search, list, resolve, get)
-├── static/            # Web dashboard files
-└── docker-compose.yml # Service orchestration
+├── sage_core/           # Shared core library (chunking, processing, validation)
+├── backend/             # FastAPI dashboard + REST API
+│   └── server.py        # REST API endpoints
+├── mcp-server/          # MCP server for LLM integration
+│   └── main.py          # MCP tools (search, list, resolve, get)
+├── tests/               # Integration tests
+├── static/              # Web dashboard files
+└── docker-compose.yml   # Service orchestration
 ```
 
 ## Services

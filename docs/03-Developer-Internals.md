@@ -10,22 +10,31 @@ A deep dive into SAGE-Docs architecture for contributors and advanced users.
 SAGE/
 ├── 📄 docker-compose.yml      # Service orchestration
 ├── 📄 README.md               # Project overview
+├── 📄 pyproject.toml          # Build and test configuration
 ├── 📄 .gitignore              # Git exclusions
+│
+├── 📂 sage_core/              # Shared Core Library (New)
+│   ├── 📄 chunking.py         # Text splitting logic
+│   ├── 📄 embeddings.py       # Embedding model wrappers
+│   ├── 📄 qdrant_utils.py     # Database operations
+│   ├── 📄 file_processing.py  # File parsers (PDF, HTML, etc.)
+│   └── 📄 validation.py       # Security validation
 │
 ├── 📂 backend/                # FastAPI Dashboard + REST API
 │   ├── 📄 Dockerfile          # Container build instructions
-│   ├── 📄 requirements.txt    # Python dependencies
-│   ├── 📄 server.py           # REST API endpoints (~660 lines)
-│   ├── 📄 ingest.py           # Document processing pipeline (~600 lines)
+│   ├── 📄 server.py           # REST API endpoints & workers
 │   └── 📂 static/             # Frontend assets
 │       ├── 📄 index.html      # Main dashboard HTML
-│       ├── 📄 app.js          # Frontend JavaScript logic
-│       └── 📄 styles.css      # Custom CSS styles
+│       └── 📄 app.js          # Frontend JavaScript logic
 │
 ├── 📂 mcp-server/             # Model Context Protocol Server
 │   ├── 📄 Dockerfile          # Container build instructions
-│   ├── 📄 requirements.txt    # Python dependencies
-│   └── 📄 main.py             # MCP tools implementation (~490 lines)
+│   └── 📄 main.py             # MCP tools implementation
+│
+├── 📂 tests/                  # Integration Test Suite
+│   ├── 📄 test_chunking.py    # Chunking logic tests
+│   ├── 📄 test_validation.py  # Security validation tests
+│   └── 📄 test_file_processing.py
 │
 ├── 📂 uploads/                # Uploaded document storage
 │   └── 📂 {library}/          # Organized by library name
@@ -49,8 +58,11 @@ SAGE/
                     ┌──────────────────┘
                     ▼
             ┌───────────────┐     File Type Detection
-            │   ingest.py   │ ────────────────────────▶ detect_file_type()
+            │   server.py   │ ────────────────────────▶ detect_file_type()
             └───────┬───────┘
+                    │
+                    ▼
+          (ProcessPoolExecutor)
                     │
         ┌───────────┼───────────┬──────────────┐
         ▼           ▼           ▼              ▼
@@ -114,7 +126,9 @@ The FastAPI server handles:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/status` | GET | Health check and Qdrant connection |
+| `/api/status` | GET | Connection status |
+| `/health` | GET | Liveness probe (k8s compatible) |
+| `/ready` | GET | Readiness probe (k8s compatible) |
 | `/api/upload` | POST | Single file upload |
 | `/api/upload-multiple` | POST | Batch file upload |
 | `/api/upload/async` | POST | Background upload for large files |
@@ -146,20 +160,21 @@ class SearchResult(BaseModel):
     score: float
 ```
 
-### Ingestion Pipeline (`ingest.py`)
+### Ingestion Pipeline (`sage_core`)
 
-The document processor handles:
+The document processing logic is now centralized in the `sage_core` package:
 
-| Function | Purpose |
-|----------|---------|
-| `detect_file_type()` | Determine format from extension/content |
-| `convert_html_to_markdown()` | Clean HTML → Markdown conversion |
-| `extract_pdf_text()` | olmocr PDF processing |
-| `extract_docx_text()` | Word document extraction |
-| `extract_excel_text()` | Excel spreadsheet parsing |
-| `split_text_semantic()` | Smart chunking with overlap |
-| `ingest_document()` | Main entry point |
-| `ensure_collection()` | Create Qdrant collection if missing |
+| Module | Function | Purpose |
+|--------|----------|---------|
+| `file_processing` | `detect_file_type()` | Determine format from extension/content |
+| `file_processing` | `convert_html_to_markdown()` | Clean HTML → Markdown conversion |
+| `file_processing` | `extract_pdf_text()` | olmocr PDF processing |
+| `chunking` | `split_text_semantic()` | Smart chunking with token-aware batching |
+| `validation` | `validate_upload()` | Security checks (size, MIME, ZIP bombs) |
+| `qdrant_utils` | `ensure_collection()` | database initialization |
+
+**Job Management:**
+Background uploads use `ProcessPoolExecutor` and store state in Qdrant (`sage_jobs` collection) for durability.
 
 **Chunking Configuration:**
 
@@ -299,7 +314,9 @@ curl -X DELETE http://localhost:8080/api/library/my-library
 
 ### Adding a New File Format
 
-1. Add detection in `ingest.py`:
+### Adding a New File Format
+
+1. Add detection in `sage_core/file_processing.py`:
 
 ```python
 def detect_file_type(filename: str, content: bytes) -> str:
@@ -347,7 +364,7 @@ backend:
 
 | Component | Bottleneck | Optimization |
 |-----------|------------|--------------|
-| PDF Processing | olmocr layout analysis | Async upload endpoint |
+| PDF Processing | olmocr layout analysis | `ProcessPoolExecutor` + Async endpoints |
 | Embedding | Model inference | Lazy load, cache models |
 | Search | Vector similarity | INT8 quantization |
 | BM25 | Index size | In-memory sparse vectors |

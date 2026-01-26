@@ -1,19 +1,19 @@
 # Priority-Ordered Action Plan
 
-## P0 – Critical (must fix before production)
-- **Patch Stored XSS Vulnerability:** Wrap `${result.library}` and `${result.version}` in `escapeHtml()` in `app.js`. This is a critical security flaw allowing arbitrary code execution in the dashboard. (Benefit: Immediate protection against injections; Effort: S)
-- **Unify Codebase ("Split Brain" Fix):** Create a shared `sage_core` package containing `ingest.py`, Qdrant connection logic, and embedding models. Import this in both `backend` and `mcp-server`. (Benefit: Eliminates duplicate logic and silent search consistency failures; Effort: L)
-- **Enforce upload constraints:** max file size, allowed MIME types, ZIP entry limits; reject oversized/empty ingests. (Benefit: prevents resource exhaustion and archive bombs; Effort: M)
+## P0 – Critical (must fix before production) ✅ COMPLETED
+- [x] **Patch Stored XSS Vulnerability:** Wrap `${result.library}` and `${result.version}` in `escapeHtml()` in `app.js`. This is a critical security flaw allowing arbitrary code execution in the dashboard. (Benefit: Immediate protection against injections; Effort: S)
+- [x] **Unify Codebase ("Split Brain" Fix):** Create a shared `sage_core` package containing `ingest.py`, Qdrant connection logic, and embedding models. Import this in both `backend` and `mcp-server`. (Benefit: Eliminates duplicate logic and silent search consistency failures; Effort: L)
+- [x] **Enforce upload constraints:** max file size, allowed MIME types, ZIP entry limits; reject oversized/empty ingests. (Benefit: prevents resource exhaustion and archive bombs; Effort: M)
 
-## P1 – High Impact
-- **Implement Process-Based Workers:** Replace `threading.Thread` with `ProcessPoolExecutor` or a dedicated queue (RQ/Celery) for ingest tasks. (Benefit: Fixes GIL blocking where uploads starve API requests; Effort: M)
-- **Durable Job State:** Move upload task tracking from in-memory `_upload_tasks` dict to Qdrant or Redis. (Benefit: Long-running uploads survive container restarts; Effort: S)
-- **Sandbox heavy parsers:** Run Docling, python-docx, and openpyxl via worker containers or seccomp/AppArmor; add timeouts. (Benefit: reduces exploit/DoS surface; Effort: M)
+## P1 – High Impact ✅ COMPLETED
+- [x] **Implement Process-Based Workers:** Replace `threading.Thread` with `ProcessPoolExecutor` or a dedicated queue (RQ/Celery) for ingest tasks. (Benefit: Fixes GIL blocking where uploads starve API requests; Effort: M)
+- [x] **Durable Job State:** Move upload task tracking from in-memory `_upload_tasks` dict to Qdrant or Redis. (Benefit: Long-running uploads survive container restarts; Effort: S)
+- [x] **Sandbox heavy parsers:** Run Docling, python-docx, and openpyxl via worker containers or seccomp/AppArmor; add timeouts. (Benefit: reduces exploit/DoS surface; Effort: M)
 
-## P2 – Medium Impact
-- **Upgrade Embedding Model:** Switch from 2021-era `all-MiniLM-L6-v2` to `nomic-embed-text-v1.5` or `bge-m3`. (Benefit: Significant jump in retrieval relevance for technical docs; Effort: S)
-- **Add Integration Tests:** Add tests for ingest pipeline, search filters, and MCP tools; add CI. (Benefit: cuts regression risk; Effort: M)
-- **Improve Observability:** structured logs, metrics, readiness probes, and dependency lockfiles. (Benefit: better operability; Effort: S)
+## P2 – Medium Impact ✅ COMPLETED
+- [ ] **Upgrade Embedding Model:** Switch from 2021-era `all-MiniLM-L6-v2` to `nomic-embed-text-v1.5` or `bge-m3`. (Benefit: Significant jump in retrieval relevance for technical docs; Effort: S)
+- [x] **Add Integration Tests:** Add tests for ingest pipeline, search filters, and MCP tools; add CI. (Benefit: cuts regression risk; Effort: M)
+- [x] **Improve Observability:** structured logs, metrics, readiness probes, and dependency lockfiles. (Benefit: better operability; Effort: S)
 
 ## P3 – Nice to Have
 - **Add document pagination/streaming:** Support partial content retrieval for large files in get_document. (Benefit: avoids truncation and large responses; Effort: S)
