@@ -42,7 +42,7 @@ _dense_model: Optional[TextEmbedding] = None
 _bm25_model: Optional[SparseTextEmbedding] = None
 
 
-async def get_qdrant_client() -> QdrantClient:
+def get_qdrant_client() -> QdrantClient:
     """Dependency for getting Qdrant client."""
     global _qdrant_client
     if _qdrant_client is None:
@@ -51,7 +51,7 @@ async def get_qdrant_client() -> QdrantClient:
     return _qdrant_client
 
 
-async def get_dense_model() -> TextEmbedding:
+def get_dense_model() -> TextEmbedding:
     """Dependency for getting dense embedding model."""
     global _dense_model
     if _dense_model is None:
@@ -60,7 +60,7 @@ async def get_dense_model() -> TextEmbedding:
     return _dense_model
 
 
-async def get_bm25_model() -> SparseTextEmbedding:
+def get_bm25_model() -> SparseTextEmbedding:
     """Dependency for getting BM25 sparse embedding model."""
     global _bm25_model
     if _bm25_model is None:
@@ -160,10 +160,10 @@ async def lifespan(app: FastAPI):
     """Lifespan handler for startup/shutdown."""
     # Startup: preload models and ensure collection
     logger.info("Preloading models...")
-    await get_dense_model()
-    await get_bm25_model()
-    client = await get_qdrant_client()
-    await ensure_collection(client)
+    get_dense_model()
+    get_bm25_model()
+    client = get_qdrant_client()
+    ensure_collection(client)
     logger.info("Models loaded.")
     yield
     # Shutdown
@@ -183,7 +183,7 @@ app = FastAPI(
 # ============================================================
 
 @app.get("/api/status")
-async def get_status(
+def get_status(
     client: Annotated[QdrantClient, Depends(get_qdrant_client)]
 ) -> ConnectionStatus:
     """Check connection status to Qdrant."""
@@ -385,14 +385,14 @@ async def get_upload_status(task_id: str) -> UploadStatus:
 
 
 @app.delete("/api/library/{library}")
-async def remove_library(
+def remove_library(
     library: str, 
     version: Optional[str] = None,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DeleteResult:
     """Delete a library (and optionally specific version) from the index."""
     try:
-        deleted_count = await delete_library(client, library, version)
+        deleted_count = delete_library(client, library, version)
         
         return DeleteResult(
             success=True,
@@ -411,7 +411,7 @@ async def remove_library(
 # ============================================================
 
 @app.get("/api/libraries")
-async def list_libraries(
+def list_libraries(
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> list[LibraryInfo]:
     """List all indexed libraries and their versions.
@@ -490,7 +490,7 @@ async def list_libraries(
 
 
 @app.post("/api/search")
-async def search_docs(
+def search_docs(
     request: SearchRequest,
     client: QdrantClient = Depends(get_qdrant_client),
     bm25_model: SparseTextEmbedding = Depends(get_bm25_model),
@@ -574,7 +574,7 @@ async def search_docs(
 
 
 @app.post("/api/resolve")
-async def resolve_library(
+def resolve_library(
     request: ResolveRequest,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> list[ResolveResult]:
@@ -675,7 +675,7 @@ async def resolve_library(
 
 
 @app.get("/api/document")
-async def get_document(
+def get_document(
     file_path: str,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DocumentResult:
