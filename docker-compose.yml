@@ -1,3 +1,19 @@
+# ============================================================================
+#     🎮 EXTERNAL GPU SERVER CONFIGURATION
+# ============================================================================
+# To use external GPU servers for embeddings and PDF processing:
+#
+# 1. Copy .env.example to .env
+# 2. Set your GPU server URLs:
+#    - VLLM_EMBEDDING_URL=http://your-gpu-server:8000  (for embeddings)
+#    - OLMOCR_SERVER=http://your-gpu-server:8000/v1   (for PDF processing)
+#
+# 3. Change EMBEDDING_MODE=local to EMBEDDING_MODE=remote in services below
+# 4. Run: docker-compose up -d
+#
+# See .env.example for detailed configuration options.
+# ============================================================================
+
 services:
   qdrant:
     image: qdrant/qdrant:latest
@@ -30,16 +46,18 @@ services:
       - MAX_ZIP_ENTRIES=${MAX_ZIP_ENTRIES:-500}
       - MAX_ZIP_TOTAL_SIZE=${MAX_ZIP_TOTAL_SIZE:-209715200}
       - WORKER_PROCESSES=${WORKER_PROCESSES:-2}
-      # Embedding settings
+      # ==================== EMBEDDING SETTINGS ====================
+      # 👇 Change 'local' to 'remote' to use external GPU server
       - EMBEDDING_MODE=local
       - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
       - DENSE_VECTOR_SIZE=384
       - USE_NOMIC_PREFIX=false
-      # Remote vLLM embeddings (optional - set EMBEDDING_MODE=remote to use)
+      # 👇 SET THESE for remote GPU embeddings (requires EMBEDDING_MODE=remote)
       - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
       - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
       - VLLM_API_KEY=${VLLM_API_KEY:-}
-      # olmocr PDF processing (set OLMOCR_SERVER for remote instance)
+      # ==================== PDF PROCESSING (GPU) ====================
+      # 👇 SET OLMOCR_SERVER to use remote GPU for PDF processing
       - OLMOCR_SERVER=${OLMOCR_SERVER:-}
       - OLMOCR_API_KEY=${OLMOCR_API_KEY:-}
       - OLMOCR_MODEL=${OLMOCR_MODEL:-allenai/olmOCR-2-7B-1025-FP8}
@@ -64,7 +82,8 @@ services:
       - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
       - DENSE_VECTOR_SIZE=384
       - USE_NOMIC_PREFIX=false
-      # olmocr PDF processing (set OLMOCR_SERVER for remote instance)
+      # ==================== PDF PROCESSING (GPU) ====================
+      # 👇 SET OLMOCR_SERVER to use remote GPU for PDF processing
       - OLMOCR_SERVER=${OLMOCR_SERVER:-}
       - OLMOCR_API_KEY=${OLMOCR_API_KEY:-}
       - OLMOCR_MODEL=${OLMOCR_MODEL:-allenai/olmOCR-2-7B-1025-FP8}
@@ -81,12 +100,13 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - COLLECTION_NAME=sage_docs
-      # Embedding settings (must match dashboard)
+      # ==================== EMBEDDING SETTINGS (must match dashboard) ====================
+      # 👇 Change 'local' to 'remote' to use external GPU server
       - EMBEDDING_MODE=local
       - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
       - DENSE_VECTOR_SIZE=384
       - USE_NOMIC_PREFIX=false
-      # Remote vLLM embeddings (optional)
+      # 👇 SET THESE for remote GPU embeddings (requires EMBEDDING_MODE=remote)
       - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
       - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
       - VLLM_API_KEY=${VLLM_API_KEY:-}
@@ -109,10 +129,12 @@ services:
       - QDRANT_HOST=qdrant
       - QDRANT_PORT=6333
       - COLLECTION_NAME=sage_docs
+      # ==================== EMBEDDING SETTINGS ====================
+      # 👇 Change 'local' to 'remote' to use external GPU server
       - EMBEDDING_MODE=local
       - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
       - USE_NOMIC_PREFIX=false
-      # Remote vLLM embeddings (optional)
+      # 👇 SET THESE for remote GPU embeddings (requires EMBEDDING_MODE=remote)
       - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
       - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
       - VLLM_API_KEY=${VLLM_API_KEY:-}
