@@ -532,7 +532,7 @@ async def ingest_document(
     logger.info(f"Ingesting document: {filename} for library {library} v{version}")
     
     # Ensure collection exists
-    await ensure_collection(client)
+    ensure_collection(client)
     
     # Detect file type
     file_type = detect_file_type(filename, content)
@@ -691,7 +691,7 @@ def save_uploaded_file(content: bytes, filename: str, library: str, version: str
     return file_path
 
 
-async def ensure_collection(client: QdrantClient):
+def ensure_collection(client: QdrantClient):
     """Ensure the collection exists with proper configuration."""
     collections = client.get_collections().collections
     exists = any(c.name == COLLECTION_NAME for c in collections)
@@ -742,7 +742,7 @@ async def ensure_collection(client: QdrantClient):
         logger.info(f"Collection {COLLECTION_NAME} created successfully")
 
 
-async def delete_library(client: QdrantClient, library: str, version: str = None) -> int:
+def delete_library(client: QdrantClient, library: str, version: str = None) -> int:
     """Delete a library (and optionally specific version) from the index."""
     filter_conditions = [
         models.FieldCondition(
