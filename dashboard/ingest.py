@@ -22,6 +22,7 @@ import shutil
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from fastembed import TextEmbedding, SparseTextEmbedding
+from embedding_utils import get_remote_embeddings_async
 
 # Tokenizer imports for token counting and batching
 try:
@@ -166,9 +167,12 @@ def yield_safe_batches(chunks_data: list[dict], max_tokens: int = MAX_BATCH_TOKE
         yield current_batch
 
 
-def get_dense_model() -> TextEmbedding:
+def get_dense_model() -> Optional[TextEmbedding]:
     """Get or create dense embedding model."""
     global _dense_model
+    if EMBEDDING_MODE == "remote":
+        return None
+
     if _dense_model is None:
         logger.info(f"Loading dense model: {DENSE_MODEL_NAME}")
         _dense_model = TextEmbedding(model_name=DENSE_MODEL_NAME)
@@ -626,7 +630,10 @@ async def _ingest_markdown(
             embed_texts = batch_texts
         
         # Generate dense embeddings for the batch
-        dense_embeddings = list(dense_model.embed(embed_texts))
+        if EMBEDDING_MODE == "remote":
+            dense_embeddings = await get_remote_embeddings_async(embed_texts)
+        else:
+            dense_embeddings = list(dense_model.embed(embed_texts))
         
         # Generate sparse embeddings for the batch
         sparse_embeddings = list(sparse_model.embed(batch_texts))
@@ -639,10 +646,16 @@ async def _ingest_markdown(
             # Create unique ID
             chunk_id = get_content_hash(f"{library}:{version}:{filename}:{chunk_index}:{chunk_text[:100]}")
             
+            # Handle dense vector format (remote returns list, local returns numpy)
+            if hasattr(dense_vec, "tolist"):
+                dense_list = dense_vec.tolist()
+            else:
+                dense_list = dense_vec
+
             point = models.PointStruct(
                 id=chunk_id,
                 vector={
-                    "dense": dense_vec.tolist(),
+                    "dense": dense_list,
                     "sparse": models.SparseVector(
                         indices=sparse_vec.indices.tolist(),
                         values=sparse_vec.values.tolist()

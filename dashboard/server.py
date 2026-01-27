@@ -21,6 +21,7 @@ from qdrant_client.http import models
 from fastembed import TextEmbedding, SparseTextEmbedding
 
 from ingest import ingest_document, delete_library, ensure_collection
+from embedding_utils import get_remote_embeddings_async, close_http_client
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -51,9 +52,12 @@ async def get_qdrant_client() -> QdrantClient:
     return _qdrant_client
 
 
-async def get_dense_model() -> TextEmbedding:
+async def get_dense_model() -> Optional[TextEmbedding]:
     """Dependency for getting dense embedding model."""
     global _dense_model
+    if EMBEDDING_MODE == "remote":
+        return None
+
     if _dense_model is None:
         logger.info(f"Loading embedding model ({DENSE_MODEL_NAME})...")
         _dense_model = TextEmbedding(model_name=DENSE_MODEL_NAME)
@@ -160,7 +164,8 @@ async def lifespan(app: FastAPI):
     """Lifespan handler for startup/shutdown."""
     # Startup: preload models and ensure collection
     logger.info("Preloading models...")
-    await get_dense_model()
+    if EMBEDDING_MODE == "local":
+        await get_dense_model()
     await get_bm25_model()
     client = await get_qdrant_client()
     await ensure_collection(client)
@@ -168,6 +173,7 @@ async def lifespan(app: FastAPI):
     yield
     # Shutdown
     logger.info("Shutting down...")
+    await close_http_client()
 
 
 app = FastAPI(
@@ -494,7 +500,7 @@ async def search_docs(
     request: SearchRequest,
     client: QdrantClient = Depends(get_qdrant_client),
     bm25_model: SparseTextEmbedding = Depends(get_bm25_model),
-    dense_model: TextEmbedding = Depends(get_dense_model)
+    dense_model: Optional[TextEmbedding] = Depends(get_dense_model)
 ) -> list[SearchResult]:
     """Search documentation using hybrid semantic + keyword search."""
     
@@ -502,7 +508,16 @@ async def search_docs(
     query_for_embed = f"search_query: {request.query}" if USE_NOMIC_PREFIX else request.query
     
     # Generate embeddings
-    dense_vector = list(dense_model.embed([query_for_embed]))[0].tolist()
+    if EMBEDDING_MODE == "remote":
+        # Use remote embedding service
+        embeddings = await get_remote_embeddings_async([query_for_embed])
+        if not embeddings:
+            raise HTTPException(status_code=500, detail="Failed to get remote embeddings")
+        dense_vector = embeddings[0]
+    else:
+        # Use local model
+        dense_vector = list(dense_model.embed([query_for_embed]))[0].tolist()
+
     sparse_embedding = list(bm25_model.embed([request.query]))[0]
     
     # Build filter conditions
