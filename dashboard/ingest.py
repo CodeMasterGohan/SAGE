@@ -406,13 +406,17 @@ def split_text_semantic(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = 
     """
     # Protect code blocks
     code_block_pattern = r'```[\s\S]*?```'
-    code_blocks = re.findall(code_block_pattern, text)
     placeholders = []
     
-    for i, block in enumerate(code_blocks):
+    # Optimization: Use re.sub callback for O(N) replacement instead of loop O(N*M)
+    def replace_callback(match):
+        i = len(placeholders)
+        block = match.group(0)
         placeholder = f"__CODE_BLOCK_{i}__"
         placeholders.append((placeholder, block))
-        text = text.replace(block, placeholder, 1)
+        return placeholder
+
+    text = re.sub(code_block_pattern, replace_callback, text)
     
     # Split by paragraphs first
     paragraphs = re.split(r'\n\n+', text)
@@ -445,10 +449,21 @@ def split_text_semantic(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = 
         chunks.append(current_chunk.strip())
     
     # Restore code blocks
+    placeholder_pattern = r'__CODE_BLOCK_(\d+)__'
+
+    # Optimization: Use re.sub to restore only placeholders present in chunk
+    def restore_callback(match):
+        try:
+            idx = int(match.group(1))
+            if 0 <= idx < len(placeholders):
+                return placeholders[idx][1] # Return the original block
+        except (ValueError, IndexError):
+            pass
+        return match.group(0)
+
     for i, chunk in enumerate(chunks):
-        for placeholder, block in placeholders:
-            chunk = chunk.replace(placeholder, block)
-        chunks[i] = chunk
+        if "__CODE_BLOCK_" in chunk:
+            chunks[i] = re.sub(placeholder_pattern, restore_callback, chunk)
     
     return chunks
 
