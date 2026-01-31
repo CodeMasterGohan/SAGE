@@ -411,12 +411,13 @@ async def remove_library(
 # ============================================================
 
 @app.get("/api/libraries")
-async def list_libraries(
+def list_libraries(
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> list[LibraryInfo]:
     """List all indexed libraries and their versions.
     
-    Optimized: Uses 2 facet queries instead of N+1 (one per library).
+    Optimized: Uses iterative facet queries to avoid expensive full-collection scrolls.
+    Runs synchronously to avoid blocking the asyncio event loop with sync client calls.
     """
     
     try:
@@ -430,56 +431,32 @@ async def list_libraries(
         if not library_facets.hits:
             return []
         
-        # Query 2: Get ALL versions in a single call (no filter)
-        # This avoids N separate queries for each library
-        version_facets = client.facet(
-            collection_name=COLLECTION_NAME,
-            key="version",
-            limit=1000
-        )
-        
-        # Build library-version mapping using scroll with minimal payload
-        # We need to know which versions belong to which libraries
-        # Scroll a sample of points to build the mapping efficiently
-        library_versions: dict[str, set[str]] = {hit.value: set() for hit in library_facets.hits}
-        
-        # Use scroll to get library-version pairs with minimal data
-        results, next_offset = client.scroll(
-            collection_name=COLLECTION_NAME,
-            limit=2000,  # Reasonable batch
-            with_payload=["library", "version"],
-            with_vectors=False
-        )
-        
-        for point in results:
-            lib = point.payload.get("library")
-            ver = point.payload.get("version")
-            if lib in library_versions and ver:
-                library_versions[lib].add(ver)
-        
-        # While there are more results, continue scrolling
-        while next_offset and len(results) == 2000:
-            results, next_offset = client.scroll(
-                collection_name=COLLECTION_NAME,
-                offset=next_offset,
-                limit=2000,
-                with_payload=["library", "version"],
-                with_vectors=False
-            )
-            for point in results:
-                lib = point.payload.get("library")
-                ver = point.payload.get("version")
-                if lib in library_versions and ver:
-                    library_versions[lib].add(ver)
-        
-        # Build result
         result = []
+
+        # Query 2: For each library, get its versions using facets
+        # This is efficient because it hits the index directly instead of scanning docs
         for hit in library_facets.hits:
             lib_name = hit.value
-            versions = sorted(library_versions.get(lib_name, set()), reverse=True)
+
+            version_facets = client.facet(
+                collection_name=COLLECTION_NAME,
+                key="version",
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="library",
+                            match=models.MatchValue(value=lib_name)
+                        )
+                    ]
+                ),
+                limit=100  # Reasonable limit for versions per library
+            )
+
+            versions = [v_hit.value for v_hit in version_facets.hits]
+
             result.append(LibraryInfo(
                 library=lib_name,
-                versions=versions
+                versions=sorted(versions, reverse=True)
             ))
         
         return sorted(result, key=lambda x: x.library)
