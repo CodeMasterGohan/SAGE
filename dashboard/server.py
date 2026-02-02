@@ -42,6 +42,12 @@ _dense_model: Optional[TextEmbedding] = None
 _bm25_model: Optional[SparseTextEmbedding] = None
 
 
+# PERFORMANCE NOTE:
+# Many endpoints below are defined as synchronous (`def`) rather than `async def`.
+# This is intentional to offload blocking I/O (Qdrant client) and CPU-bound tasks (embeddings)
+# to a thread pool, preventing them from blocking the main asyncio event loop.
+
+
 async def get_qdrant_client() -> QdrantClient:
     """Dependency for getting Qdrant client."""
     global _qdrant_client
@@ -183,7 +189,7 @@ app = FastAPI(
 # ============================================================
 
 @app.get("/api/status")
-async def get_status(
+def get_status(
     client: Annotated[QdrantClient, Depends(get_qdrant_client)]
 ) -> ConnectionStatus:
     """Check connection status to Qdrant."""
@@ -385,14 +391,17 @@ async def get_upload_status(task_id: str) -> UploadStatus:
 
 
 @app.delete("/api/library/{library}")
-async def remove_library(
+def remove_library(
     library: str, 
     version: Optional[str] = None,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DeleteResult:
-    """Delete a library (and optionally specific version) from the index."""
+    """Delete a library (and optionally specific version) from the index.
+
+    Synchronous endpoint to prevent blocking the event loop during deletion.
+    """
     try:
-        deleted_count = await delete_library(client, library, version)
+        deleted_count = delete_library(client, library, version)
         
         return DeleteResult(
             success=True,
@@ -411,7 +420,7 @@ async def remove_library(
 # ============================================================
 
 @app.get("/api/libraries")
-async def list_libraries(
+def list_libraries(
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> list[LibraryInfo]:
     """List all indexed libraries and their versions.
@@ -490,7 +499,7 @@ async def list_libraries(
 
 
 @app.post("/api/search")
-async def search_docs(
+def search_docs(
     request: SearchRequest,
     client: QdrantClient = Depends(get_qdrant_client),
     bm25_model: SparseTextEmbedding = Depends(get_bm25_model),
@@ -574,7 +583,7 @@ async def search_docs(
 
 
 @app.post("/api/resolve")
-async def resolve_library(
+def resolve_library(
     request: ResolveRequest,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> list[ResolveResult]:
@@ -675,7 +684,7 @@ async def resolve_library(
 
 
 @app.get("/api/document")
-async def get_document(
+def get_document(
     file_path: str,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DocumentResult:
