@@ -742,8 +742,12 @@ async def ensure_collection(client: QdrantClient):
         logger.info(f"Collection {COLLECTION_NAME} created successfully")
 
 
-async def delete_library(client: QdrantClient, library: str, version: str = None) -> int:
-    """Delete a library (and optionally specific version) from the index."""
+def delete_library(client: QdrantClient, library: str, version: str = None) -> int:
+    """Delete a library (and optionally specific version) from the index.
+
+    Note: This function is synchronous to run in a threadpool when called from FastAPI,
+    avoiding event loop blocking by the synchronous QdrantClient.
+    """
     filter_conditions = [
         models.FieldCondition(
             key="library",
