@@ -416,7 +416,8 @@ async def list_libraries(
 ) -> list[LibraryInfo]:
     """List all indexed libraries and their versions.
     
-    Optimized: Uses 2 facet queries instead of N+1 (one per library).
+    Optimized: Uses iterative facet queries to avoid full collection scan.
+    Complexity: O(NumLibraries) instead of O(TotalDocs).
     """
     
     try:
@@ -430,53 +431,30 @@ async def list_libraries(
         if not library_facets.hits:
             return []
         
-        # Query 2: Get ALL versions in a single call (no filter)
-        # This avoids N separate queries for each library
-        version_facets = client.facet(
-            collection_name=COLLECTION_NAME,
-            key="version",
-            limit=1000
-        )
-        
-        # Build library-version mapping using scroll with minimal payload
-        # We need to know which versions belong to which libraries
-        # Scroll a sample of points to build the mapping efficiently
-        library_versions: dict[str, set[str]] = {hit.value: set() for hit in library_facets.hits}
-        
-        # Use scroll to get library-version pairs with minimal data
-        results, next_offset = client.scroll(
-            collection_name=COLLECTION_NAME,
-            limit=2000,  # Reasonable batch
-            with_payload=["library", "version"],
-            with_vectors=False
-        )
-        
-        for point in results:
-            lib = point.payload.get("library")
-            ver = point.payload.get("version")
-            if lib in library_versions and ver:
-                library_versions[lib].add(ver)
-        
-        # While there are more results, continue scrolling
-        while next_offset and len(results) == 2000:
-            results, next_offset = client.scroll(
-                collection_name=COLLECTION_NAME,
-                offset=next_offset,
-                limit=2000,
-                with_payload=["library", "version"],
-                with_vectors=False
-            )
-            for point in results:
-                lib = point.payload.get("library")
-                ver = point.payload.get("version")
-                if lib in library_versions and ver:
-                    library_versions[lib].add(ver)
-        
-        # Build result
         result = []
+
+        # Query 2: For each library, get its unique versions
+        # This is much faster than scrolling the entire collection
         for hit in library_facets.hits:
             lib_name = hit.value
-            versions = sorted(library_versions.get(lib_name, set()), reverse=True)
+
+            # Get versions for this specific library
+            version_facets = client.facet(
+                collection_name=COLLECTION_NAME,
+                key="version",
+                limit=1000,
+                filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="library",
+                            match=models.MatchValue(value=lib_name)
+                        )
+                    ]
+                )
+            )
+
+            versions = sorted([v.value for v in version_facets.hits], reverse=True)
+
             result.append(LibraryInfo(
                 library=lib_name,
                 versions=versions
