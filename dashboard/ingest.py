@@ -742,7 +742,7 @@ async def ensure_collection(client: QdrantClient):
         logger.info(f"Collection {COLLECTION_NAME} created successfully")
 
 
-async def delete_library(client: QdrantClient, library: str, version: str = None) -> int:
+def delete_library(client: QdrantClient, library: str, version: str = None) -> int:
     """Delete a library (and optionally specific version) from the index."""
     filter_conditions = [
         models.FieldCondition(

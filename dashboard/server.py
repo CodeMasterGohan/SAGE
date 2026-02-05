@@ -385,14 +385,14 @@ async def get_upload_status(task_id: str) -> UploadStatus:
 
 
 @app.delete("/api/library/{library}")
-async def remove_library(
+def remove_library(
     library: str, 
     version: Optional[str] = None,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DeleteResult:
     """Delete a library (and optionally specific version) from the index."""
     try:
-        deleted_count = await delete_library(client, library, version)
+        deleted_count = delete_library(client, library, version)
         
         return DeleteResult(
             success=True,
@@ -410,8 +410,11 @@ async def remove_library(
 # SEARCH & LIBRARY ENDPOINTS (same as DRUID)
 # ============================================================
 
+# Note: These endpoints are defined as sync functions (def) to run in a thread pool,
+# preventing blocking of the main event loop by synchronous Qdrant/embedding operations.
+
 @app.get("/api/libraries")
-async def list_libraries(
+def list_libraries(
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> list[LibraryInfo]:
     """List all indexed libraries and their versions.
@@ -490,7 +493,7 @@ async def list_libraries(
 
 
 @app.post("/api/search")
-async def search_docs(
+def search_docs(
     request: SearchRequest,
     client: QdrantClient = Depends(get_qdrant_client),
     bm25_model: SparseTextEmbedding = Depends(get_bm25_model),
@@ -574,7 +577,7 @@ async def search_docs(
 
 
 @app.post("/api/resolve")
-async def resolve_library(
+def resolve_library(
     request: ResolveRequest,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> list[ResolveResult]:
@@ -675,7 +678,7 @@ async def resolve_library(
 
 
 @app.get("/api/document")
-async def get_document(
+def get_document(
     file_path: str,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DocumentResult:
