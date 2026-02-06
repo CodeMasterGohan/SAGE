@@ -1,3 +1,8 @@
+> **⚠️ ARCHIVED DOCUMENT**  
+> This integration guide references vault service which has been **removed** from SAGE (Phase 1).  
+> For current service architecture, see [03-Developer-Internals.md](03-Developer-Internals.md).  
+> For ingestion details, see [sage_core/ingestion.py](../sage_core/ingestion.py).
+
 # Service Integration Guide - Unified Ingestion
 
 After the ingestion unification refactor, all SAGE services use the same consolidated pipeline from `sage_core.ingestion`. This guide shows how each service integrates with it.

@@ -1,3 +1,8 @@
+> **⚠️ ARCHIVED DOCUMENT**  
+> This action plan was created when vault service was active and includes references to it.  
+> The vault service has since been **removed** from SAGE architecture (Phase 1).  
+> Refer to [03-Developer-Internals.md](03-Developer-Internals.md) for current architecture.
+
 Maturity: early production with solid foundations (centralized core library, background
    ingestion, tests) but notable gaps in security hardening, operational readiness, and consistency across services.
    Strengths: clear architecture, shared sage_core, upload validation, async ingestion with durable job state, decent

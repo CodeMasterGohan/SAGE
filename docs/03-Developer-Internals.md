@@ -13,34 +13,52 @@ SAGE/
 ├── 📄 pyproject.toml          # Build and test configuration
 ├── 📄 .gitignore              # Git exclusions
 │
-├── 📂 sage_core/              # Shared Core Library (New)
-│   ├── 📄 chunking.py         # Text splitting logic
-│   ├── 📄 embeddings.py       # Embedding model wrappers
-│   ├── 📄 qdrant_utils.py     # Database operations
-│   ├── 📄 file_processing.py  # File parsers (PDF, HTML, etc.)
-│   └── 📄 validation.py       # Security validation
+├── 📂 sage_core/              # Shared Core Library (Phases 1-5)
+│   ├── 📄 __init__.py         # Package initialization
+│   ├── 📄 chunking.py         # Text splitting logic with truncation warnings
+│   ├── 📄 embeddings.py       # Embedding model wrappers (local/remote)
+│   ├── 📄 qdrant_utils.py     # Database operations & deduplication
+│   ├── 📄 file_processing.py  # File parsers (PDF async, HTML, DOCX, Excel)
+│   ├── 📄 ingestion.py        # Unified ingestion pipeline with error handling
+│   └── 📄 validation.py       # Security validation (ZIP bombs, etc.)
 │
-├── 📂 backend/                # FastAPI Dashboard + REST API
+├── 📂 dashboard/              # FastAPI Dashboard + REST API
 │   ├── 📄 Dockerfile          # Container build instructions
-│   ├── 📄 server.py           # REST API endpoints & workers
+│   ├── 📄 server.py           # REST API endpoints & background workers
+│   ├── 📄 ingest.py           # Ingestion wrapper (uses sage_core)
 │   └── 📂 static/             # Frontend assets
 │       ├── 📄 index.html      # Main dashboard HTML
-│       └── 📄 app.js          # Frontend JavaScript logic
+│       ├── 📄 app.js          # Frontend JavaScript logic
+│       └── 📄 styles.css      # Styling
+│
+├── 📂 refinery/               # Legacy Processing Service
+│   ├── 📄 Dockerfile          # Container build instructions
+│   └── 📄 main.py             # Thin wrapper around sage_core
 │
 ├── 📂 mcp-server/             # Model Context Protocol Server
 │   ├── 📄 Dockerfile          # Container build instructions
-│   └── 📄 main.py             # MCP tools implementation
+│   ├── 📄 main.py             # MCP tools implementation
+│   ├── 📄 middleware.py       # Context management & ambiguity handling
+│   └── 📄 search.py           # Search workflow
 │
 ├── 📂 tests/                  # Integration Test Suite
 │   ├── 📄 test_chunking.py    # Chunking logic tests
 │   ├── 📄 test_validation.py  # Security validation tests
-│   └── 📄 test_file_processing.py
+│   ├── 📄 test_deduplication.py  # Phase 2 tests
+│   ├── 📄 test_truncation_warnings.py  # Phase 3 tests
+│   ├── 📄 test_async_pdf_processing.py  # Phase 4 tests
+│   └── 📄 test_error_handling.py  # Phase 5 tests
 │
 ├── 📂 uploads/                # Uploaded document storage
 │   └── 📂 {library}/          # Organized by library name
 │       └── 📂 {version}/      # Then by version
 │
-└── 📂 docs/                   # This documentation!
+└── 📂 docs/                   # Documentation
+    ├── 📄 architecture.md     # System architecture deep dive
+    ├── 📄 api-reference.md    # Complete API documentation
+    ├── 📄 configuration.md    # Environment variables reference
+    ├── 📄 deployment.md       # Production deployment guide
+    └── 📄 troubleshooting.md  # Common issues & solutions
 ```
 
 ---
@@ -120,7 +138,7 @@ SAGE/
 
 ## 🔧 Core Components
 
-### Backend Server (`server.py`)
+### Dashboard Server (`dashboard/server.py`)
 
 The FastAPI server handles:
 
@@ -129,16 +147,23 @@ The FastAPI server handles:
 | `/api/status` | GET | Connection status |
 | `/health` | GET | Liveness probe (k8s compatible) |
 | `/ready` | GET | Readiness probe (k8s compatible) |
-| `/api/upload` | POST | Single file upload |
+| `/api/upload` | POST | Single file upload (sync) |
+| `/api/upload/async` | POST | Background upload for large files (Phase 4) |
+| `/api/upload/status/{id}` | GET | Check async upload progress (Phase 4) |
 | `/api/upload-multiple` | POST | Batch file upload |
-| `/api/upload/async` | POST | Background upload for large files |
-| `/api/upload/status/{id}` | GET | Check async upload progress |
 | `/api/search` | POST | Hybrid search with fusion |
 | `/api/resolve` | POST | Find libraries by name |
 | `/api/libraries` | GET | List all libraries |
 | `/api/document` | GET | Retrieve full document |
 | `/api/library/{name}` | DELETE | Delete library |
 | `/` | GET | Serve dashboard HTML |
+
+**Phase Features:**
+- **Phase 1:** Vault removed, Qdrant is single source of truth
+- **Phase 2:** Content deduplication via SHA256 hashing
+- **Phase 3:** Truncation warnings in upload response
+- **Phase 4:** Async PDF processing with durable job state
+- **Phase 5:** Structured error handling with `IngestionError`
 
 **Key Classes:**
 
@@ -158,6 +183,21 @@ class SearchResult(BaseModel):
     type: str
     file_path: str
     score: float
+
+class UploadResult(BaseModel):
+    success: bool
+    library: str
+    version: str
+    files_processed: int
+    chunks_indexed: int
+    message: str
+    was_duplicate: bool = False  # Phase 2
+    linked_to: Optional[str] = None  # Phase 2
+    truncation_warnings: list[dict] = []  # Phase 3
+
+class IngestionError(Exception):  # Phase 5
+    """Structured error with processing_step, file_name, and details"""
+    pass
 ```
 
 ### Ingestion Pipeline (`sage_core`)
@@ -236,14 +276,31 @@ Each indexed chunk contains:
 
 ```python
 {
-    "content": str,       # The actual chunk text
-    "library": str,       # Library name
-    "version": str,       # Version string
-    "title": str,         # Document title
-    "file_path": str,     # Path to stored file
-    "chunk_index": int,   # Position in document
-    "total_chunks": int,  # Total chunks in document
-    "type": str           # Always "document"
+    "content": str,           # The actual chunk text
+    "library": str,           # Library name
+    "version": str,           # Version string
+    "title": str,             # Document title
+    "file_path": str,         # Path to stored file
+    "chunk_index": int,       # Position in document
+    "total_chunks": int,      # Total chunks in document
+    "type": str,              # Always "document"
+    "content_hash": str,      # SHA256 hash for deduplication (Phase 2)
+    "linked_files": list      # Duplicate file references (Phase 2)
+}
+```
+
+**Job State (sage_jobs collection):**
+```python
+{
+    "task_id": str,
+    "status": str,  # pending/processing/completed/failed
+    "progress": str,
+    "filename": str,
+    "library": str,
+    "version": str,
+    "created_at": str,
+    "result": dict,  # UploadResult on completion
+    "error": str     # Error message on failure
 }
 ```
 

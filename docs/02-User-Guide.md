@@ -85,12 +85,17 @@ SAGE-Docs can process:
 |--------|------------|-------|
 | **Markdown** | `.md`, `.markdown` | Preserves headers and code blocks |
 | **HTML** | `.html`, `.htm` | Converted to clean Markdown |
-| **Plain Text** | `.txt`, `.rst` | Chunked as-is |
-| **PDF** | `.pdf` | Uses olmocr for layout analysis |
+| **Plain Text** | `.txt`, `.rst`, `.adoc` | Chunked as-is |
+| **PDF** | `.pdf` | Uses olmocr for layout analysis (async processing) |
 | **Word** | `.docx` | Extracts text with heading structure |
 | **Excel** | `.xlsx`, `.xls` | Converts sheets to searchable text |
 | **Archives** | `.zip` | Extracts and processes all docs inside |
-| **Allowed Exts** | .md, .txt, .html, .pdf, .docx, .xlsx, .zip | All others are rejected |
+
+**Phase Features:**
+- **Phase 2:** Duplicate detection - identical files automatically linked
+- **Phase 3:** Truncation warnings - notifies when content exceeds limits
+- **Phase 4:** Async PDF processing - large PDFs processed in background
+- **Phase 5:** Error handling - detailed error messages with recovery suggestions
 
 ### Upload Constraints
 
@@ -112,7 +117,38 @@ To ensure system stability, the following limits apply:
 5. Watch the progress indicator
 6. See the success message with chunk count
 
-> ⚠️ **Warning:** PDF files may take significantly longer due to layout analysis. The page will show a progress message, and you can safely close the browser—processing continues in the background.
+**Upload Response Details (Phase 2 & 3):**
+- `chunks_indexed` - Number of chunks created
+- `was_duplicate` - Whether file was already indexed
+- `linked_to` - Original file path if duplicate
+- `truncation_warnings` - List of sections that exceeded size limits
+
+> ⚠️ **Warning:** PDF files may take significantly longer due to layout analysis. For large PDFs, use the async upload endpoint (automatically used for PDFs >10MB). The page will show a progress message, and you can safely close the browser—processing continues in the background with durable job tracking (Phase 4).
+
+**Understanding Upload Results:**
+
+**Duplicate Detection (Phase 2):**
+If you upload the same file twice, SAGE will:
+- Skip expensive embedding generation (saves time & cost)
+- Link the new file to existing chunks
+- Return `was_duplicate: true` with original file path
+
+**Truncation Warnings (Phase 3):**
+If chunks exceed size limits, you'll see warnings:
+```json
+{
+  "truncation_warnings": [
+    {
+      "chunk_index": 12,
+      "original_size": 5200,
+      "truncated_size": 4000,
+      "truncation_type": "character",
+      "section_title": "Advanced API Reference"
+    }
+  ]
+}
+```
+This helps you identify sections that may need splitting into smaller files.
 
 ### Uploading Multiple Files
 

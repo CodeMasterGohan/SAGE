@@ -34,6 +34,7 @@ from fastembed import TextEmbedding, SparseTextEmbedding
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from sage_core.validation import validate_upload, UploadValidationError
+from sage_core.file_processing import PDFProcessingError
 
 # Keep ingest for now, will be migrated to sage_core in future
 from ingest import ingest_document, delete_library, ensure_collection as legacy_ensure_collection
@@ -164,6 +165,9 @@ class UploadResult(BaseModel):
     files_processed: int
     chunks_indexed: int
     message: str
+    was_duplicate: bool = False
+    linked_to: Optional[str] = None
+    truncation_warnings: list[dict] = []
 
 
 class AsyncUploadStarted(BaseModel):
@@ -347,16 +351,67 @@ def _process_upload_worker(task_id: str, content: bytes, filename: str, library:
                 "version": result["version"],
                 "files_processed": result["files_processed"],
                 "chunks_indexed": result["chunks_indexed"],
-                "message": f"Successfully indexed {result['chunks_indexed']} chunks"
+                "message": f"Successfully indexed {result['chunks_indexed']} chunks",
+                "was_duplicate": result.get("was_duplicate", False),
+                "linked_to": result.get("linked_to"),
+                "truncation_warnings": result.get("truncation_warnings", [])
             }
         )
 
         return {"success": True, "result": result}
 
     except Exception as e:
+        # Try to import IngestionError for structured error handling
+        try:
+            from sage_core.ingestion import IngestionError
+            if isinstance(e, IngestionError):
+                error_msg = f"{e.processing_step} failed: {e.message}"
+                error_details = {
+                    "processing_step": e.processing_step,
+                    "file_name": e.file_name,
+                    "details": e.details
+                }
+                logger.error(f"Background upload failed with structured error: {error_msg}")
+                update_job(
+                    client, task_id,
+                    status="failed",
+                    error=error_msg,
+                    error_details=error_details
+                )
+                return {"success": False, "error": error_msg, "error_details": error_details}
+        except ImportError:
+            pass
+        
+        # Handle PDF processing errors
+        if isinstance(e, PDFProcessingError):
+            error_msg = f"PDF processing failed: {str(e)}"
+            logger.error(f"Background upload failed with PDF error: {error_msg}")
+            update_job(
+                client, task_id,
+                status="failed",
+                error=error_msg,
+                error_details={
+                    "processing_step": "extraction",
+                    "file_name": filename,
+                    "details": {"error_type": "PDFProcessingError"}
+                }
+            )
+            return {"success": False, "error": error_msg}
+        
+        # Generic error
         logger.error(f"Background upload failed: {e}")
-        update_job(client, task_id, status="failed", error=str(e))
-        return {"success": False, "error": str(e)}
+        error_msg = f"Upload failed: {str(e)}"
+        update_job(
+            client, task_id,
+            status="failed",
+            error=error_msg,
+            error_details={
+                "processing_step": "unknown",
+                "file_name": filename,
+                "details": {"error_type": type(e).__name__}
+            }
+        )
+        return {"success": False, "error": error_msg}
 
 
 @asynccontextmanager
@@ -496,14 +551,59 @@ async def upload_document(
             version=result["version"],
             files_processed=result["files_processed"],
             chunks_indexed=result["chunks_indexed"],
-            message=f"Successfully indexed {result['chunks_indexed']} chunks from {result['files_processed']} files"
+            message=f"Successfully indexed {result['chunks_indexed']} chunks from {result['files_processed']} files",
+            was_duplicate=result.get("was_duplicate", False),
+            linked_to=result.get("linked_to"),
+            truncation_warnings=result.get("truncation_warnings", [])
         )
 
     except HTTPException:
         raise
     except Exception as e:
+        # Import IngestionError if available
+        try:
+            from sage_core.ingestion import IngestionError
+            if isinstance(e, IngestionError):
+                # Return structured error details
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "success": False,
+                        "error": e.message,
+                        "processing_step": e.processing_step,
+                        "file_name": e.file_name,
+                        "details": e.details
+                    }
+                )
+        except ImportError:
+            pass
+        
+        # Handle PDF processing errors
+        if isinstance(e, PDFProcessingError):
+            logger.error(f"PDF processing failed: {e}")
+            raise HTTPException(
+                status_code=422,
+                detail={
+                    "success": False,
+                    "error": f"PDF processing failed: {str(e)}",
+                    "processing_step": "extraction",
+                    "file_name": file.filename,
+                    "details": {"error_type": "PDFProcessingError"}
+                }
+            )
+        
+        # Generic error
         logger.error(f"Upload failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "error": str(e),
+                "processing_step": "unknown",
+                "file_name": file.filename,
+                "details": {"error_type": type(e).__name__}
+            }
+        )
 
 
 @app.post("/api/upload-multiple")
@@ -517,6 +617,9 @@ async def upload_multiple_documents(
     try:
         total_files = 0
         total_chunks = 0
+        any_duplicate = False
+        last_linked_to = None
+        all_truncation_warnings = []
 
         for file in files:
             content = await file.read()
@@ -527,15 +630,54 @@ async def upload_multiple_documents(
             except UploadValidationError as e:
                 raise HTTPException(status_code=400, detail=f"{file.filename}: {e}")
 
-            result = await ingest_document(
-                client=client,
-                content=content,
-                filename=file.filename,
-                library=library,
-                version=version
-            )
-            total_files += result["files_processed"]
-            total_chunks += result["chunks_indexed"]
+            try:
+                result = await ingest_document(
+                    client=client,
+                    content=content,
+                    filename=file.filename,
+                    library=library,
+                    version=version
+                )
+                total_files += result["files_processed"]
+                total_chunks += result["chunks_indexed"]
+                all_truncation_warnings.extend(result.get("truncation_warnings", []))
+                
+                # Track if any file was a duplicate
+                if result.get("was_duplicate"):
+                    any_duplicate = True
+                    last_linked_to = result.get("linked_to")
+            except Exception as e:
+                # Import IngestionError if available
+                try:
+                    from sage_core.ingestion import IngestionError
+                    if isinstance(e, IngestionError):
+                        raise HTTPException(
+                            status_code=422,
+                            detail={
+                                "success": False,
+                                "error": f"{file.filename}: {e.message}",
+                                "processing_step": e.processing_step,
+                                "file_name": e.file_name,
+                                "details": e.details
+                            }
+                        )
+                except ImportError:
+                    pass
+                
+                # Handle PDF processing errors
+                if isinstance(e, PDFProcessingError):
+                    logger.error(f"PDF processing failed for {file.filename}: {e}")
+                    raise HTTPException(
+                        status_code=422,
+                        detail={
+                            "success": False,
+                            "error": f"{file.filename}: PDF processing failed - {str(e)}",
+                            "processing_step": "extraction",
+                            "file_name": file.filename,
+                            "details": {"error_type": "PDFProcessingError"}
+                        }
+                    )
+                raise
 
         return UploadResult(
             success=True,
@@ -543,14 +685,25 @@ async def upload_multiple_documents(
             version=version,
             files_processed=total_files,
             chunks_indexed=total_chunks,
-            message=f"Successfully indexed {total_chunks} chunks from {total_files} files"
+            message=f"Successfully indexed {total_chunks} chunks from {total_files} files",
+            was_duplicate=any_duplicate,
+            linked_to=last_linked_to,
+            truncation_warnings=all_truncation_warnings
         )
 
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Upload failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "success": False,
+                "error": str(e),
+                "processing_step": "unknown",
+                "details": {"error_type": type(e).__name__}
+            }
+        )
 
 
 @app.post("/api/upload/async")

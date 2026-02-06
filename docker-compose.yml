@@ -89,34 +89,6 @@ services:
       - OLMOCR_MODEL=${OLMOCR_MODEL:-allenai/olmOCR-2-7B-1025-FP8}
     restart: unless-stopped
 
-  vault:
-    build: ./vault
-    container_name: sage-docs-vault
-    depends_on:
-      - qdrant
-    volumes:
-      - ./uploads:/app/uploads
-    environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - COLLECTION_NAME=sage_docs
-      # ==================== EMBEDDING SETTINGS (must match dashboard) ====================
-      # 👇 Change 'local' to 'remote' to use external GPU server
-      - EMBEDDING_MODE=local
-      - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-      - DENSE_VECTOR_SIZE=384
-      - USE_NOMIC_PREFIX=false
-      # 👇 SET THESE for remote GPU embeddings (requires EMBEDDING_MODE=remote)
-      - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
-      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
-      - VLLM_API_KEY=${VLLM_API_KEY:-}
-      # Batching configuration
-      - MAX_BATCH_TOKENS=2000
-      - VAULT_CONCURRENCY=${VAULT_CONCURRENCY:-}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    restart: "no"
-
   mcp-server:
     build: ./mcp-server
     container_name: sage-docs-mcp

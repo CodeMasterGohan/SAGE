@@ -1,3 +1,8 @@
+> **⚠️ ARCHIVED DOCUMENT**  
+> This document describes ingestion unification work completed when vault service was active.  
+> The vault service has since been **removed** from SAGE architecture (Phase 1).  
+> Refer to [03-Developer-Internals.md](03-Developer-Internals.md) for current architecture.
+
 # Ingestion Logic Unification - Completion Summary
 
 ## Overview

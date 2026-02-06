@@ -157,6 +157,7 @@ async function handleFileUpload(files) {
     let processed = 0;
     let totalChunks = 0;
     let hasErrors = false;
+    let allTruncationWarnings = [];
 
     for (const file of files) {
         const isPDF = file.name.toLowerCase().endsWith('.pdf');
@@ -203,6 +204,11 @@ async function handleFileUpload(files) {
                         if (status === 'completed' && statusData.result) {
                             totalChunks += statusData.result.chunks_indexed;
                             uploadStatus.textContent = 'Indexing complete!';
+                            
+                            // Collect truncation warnings
+                            if (statusData.result.truncation_warnings && statusData.result.truncation_warnings.length > 0) {
+                                allTruncationWarnings.push(...statusData.result.truncation_warnings);
+                            }
                         } else if (status === 'failed') {
                             console.error('Upload failed:', statusData.error);
                             uploadStatus.textContent = `Error: ${statusData.error}`;
@@ -228,6 +234,11 @@ async function handleFileUpload(files) {
                 if (response.ok) {
                     totalChunks += result.chunks_indexed;
                     uploadStatus.textContent = 'Done!';
+                    
+                    // Collect truncation warnings
+                    if (result.truncation_warnings && result.truncation_warnings.length > 0) {
+                        allTruncationWarnings.push(...result.truncation_warnings);
+                    }
                 } else {
                     console.error('Upload failed:', result);
                     uploadStatus.textContent = `Error: ${result.detail || 'Upload failed'}`;
@@ -249,7 +260,7 @@ async function handleFileUpload(files) {
 
     if (hasErrors || totalChunks === 0) {
         uploadResultTitle.textContent = totalChunks > 0 ? 'Upload completed with issues' : 'Upload failed';
-        uploadResultMessage.textContent = totalChunks > 0
+        uploadResultMessage.innerHTML = totalChunks > 0
             ? `Indexed ${totalChunks} chunks but some files had errors. Check console.`
             : 'No content was indexed. Check console for errors.';
         // Change to error styling
@@ -259,12 +270,26 @@ async function handleFileUpload(files) {
         uploadResultMessage.className = 'text-red-300/70 text-sm';
     } else {
         uploadResultTitle.textContent = 'Upload successful!';
-        uploadResultMessage.textContent = `Indexed ${totalChunks} chunks from ${processed} file(s) into "${library}" v${version}`;
-        // Reset to success styling
-        uploadResult.querySelector('div').className = 'p-4 rounded-lg bg-green-900/20 border border-green-800';
-        uploadResult.querySelector('i').className = 'fa-solid fa-check-circle text-green-400 text-xl';
-        uploadResultTitle.className = 'text-green-400 font-medium';
-        uploadResultMessage.className = 'text-green-300/70 text-sm';
+        let message = `Indexed ${totalChunks} chunks from ${processed} file(s) into "${library}" v${version}`;
+        
+        // Add truncation warnings if present
+        if (allTruncationWarnings.length > 0) {
+            message += renderTruncationWarnings(allTruncationWarnings);
+        }
+        
+        uploadResultMessage.innerHTML = message;
+        // Reset to success styling (with warning color if truncations exist)
+        if (allTruncationWarnings.length > 0) {
+            uploadResult.querySelector('div').className = 'p-4 rounded-lg bg-yellow-900/20 border border-yellow-800';
+            uploadResult.querySelector('i').className = 'fa-solid fa-exclamation-triangle text-yellow-400 text-xl';
+            uploadResultTitle.className = 'text-yellow-400 font-medium';
+            uploadResultMessage.className = 'text-yellow-300/70 text-sm';
+        } else {
+            uploadResult.querySelector('div').className = 'p-4 rounded-lg bg-green-900/20 border border-green-800';
+            uploadResult.querySelector('i').className = 'fa-solid fa-check-circle text-green-400 text-xl';
+            uploadResultTitle.className = 'text-green-400 font-medium';
+            uploadResultMessage.className = 'text-green-300/70 text-sm';
+        }
     }
 
     // Refresh libraries
@@ -681,7 +706,51 @@ function truncateText(text, maxLength) {
     return text.substring(0, maxLength) + '...';
 }
 
-function highlightCode(code) {
+f
+
+function renderTruncationWarnings(warnings) {
+    if (!warnings || warnings.length === 0) return '';
+    
+    const charWarnings = warnings.filter(w => w.truncation_type === 'character');
+    const tokenWarnings = warnings.filter(w => w.truncation_type === 'token');
+    
+    let warningHtml = '<div class="mt-3 p-3 bg-yellow-950/30 border border-yellow-800/50 rounded-lg">';
+    warningHtml += '<div class="flex items-start gap-2 mb-2">';
+    warningHtml += '<i class="fa-solid fa-exclamation-triangle text-yellow-400 text-sm mt-0.5"></i>';
+    warningHtml += '<div class="flex-1">';
+    warningHtml += '<div class="text-yellow-400 font-medium text-xs mb-1">Content Truncation Warning</div>';
+    
+    if (charWarnings.length > 0) {
+        warningHtml += `<div class="text-yellow-300/80 text-xs mb-1">• ${charWarnings.length} chunk(s) exceeded 4000 character limit and were truncated</div>`;
+    }
+    
+    if (tokenWarnings.length > 0) {
+        warningHtml += `<div class="text-yellow-300/80 text-xs mb-1">• ${tokenWarnings.length} chunk(s) exceeded 500 token limit and were truncated</div>`;
+    }
+    
+    warningHtml += '<div class="text-yellow-300/60 text-xs mt-2">Consider breaking large sections into smaller parts for better search results.</div>';
+    
+    // Show details for first few warnings
+    const displayWarnings = warnings.slice(0, 3);
+    if (displayWarnings.length > 0) {
+        warningHtml += '<div class="mt-2 space-y-1">';
+        displayWarnings.forEach(w => {
+            const lossPercent = Math.round(((w.original_size - w.truncated_size) / w.original_size) * 100);
+            const sectionText = w.section_title ? ` "${escapeHtml(w.section_title)}"` : '';
+            warningHtml += `<div class="text-yellow-300/70 text-[10px] font-mono">`;
+            warningHtml += `Chunk ${w.chunk_index}${sectionText}: ${w.original_size} → ${w.truncated_size} ${w.truncation_type === 'character' ? 'chars' : 'tokens'} (${lossPercent}% lost)`;
+            warningHtml += `</div>`;
+        });
+        warningHtml += '</div>';
+        
+        if (warnings.length > 3) {
+            warningHtml += `<div class="text-yellow-300/50 text-[10px] mt-1">+ ${warnings.length - 3} more truncations</div>`;
+        }
+    }
+    
+    warningHtml += '</div></div></div>';
+    return warningHtml;
+}unction highlightCode(code) {
     if (!code) return '';
 
     // Basic syntax highlighting

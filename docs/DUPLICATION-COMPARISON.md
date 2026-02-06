@@ -1,3 +1,8 @@
+> **⚠️ ARCHIVED DOCUMENT**  
+> This document describes code duplication analysis from when vault service was active.  
+> The vault service has since been **removed** from SAGE architecture (Phase 1).  
+> Refer to [03-Developer-Internals.md](03-Developer-Internals.md) for current architecture.
+
 # Before & After: Code Duplication Comparison
 
 ## Summary

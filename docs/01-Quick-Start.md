@@ -46,13 +46,14 @@ This command will:
 docker-compose ps
 ```
 
-You should see all three containers in a `healthy` or `running` state:
+You should see all containers in a `healthy` or `running` state:
 
 ```
-NAME                 STATUS
-sage-docs-backend    Up (healthy)
-sage-docs-mcp        Up
-sage-docs-qdrant     Up
+NAME                     STATUS
+sage-docs-dashboard      Up (healthy)
+sage-docs-mcp            Up
+sage-docs-qdrant         Up
+sage-docs-refinery       Up (optional, legacy)
 ```
 
 ### Step 4: Open the Dashboard
@@ -71,12 +72,24 @@ SAGE-Docs uses environment variables for configuration. These are set in `docker
 |----------|-------------|---------|
 | `QDRANT_HOST` | Hostname of the Qdrant server | `qdrant` |
 | `QDRANT_PORT` | Port for Qdrant connection | `6333` |
-| `COLLECTION_NAME` | Name of the Qdrant collection | `sage_docs` |
+| `COLLECTION_NAME` | Main collection for documents | `sage_docs` |
+| `JOBS_COLLECTION` | Collection for async job state (Phase 4) | `sage_jobs` |
 | `EMBEDDING_MODE` | Embedding backend (`local` or `remote`) | `local` |
 | `DENSE_MODEL_NAME` | Dense embedding model to use | `sentence-transformers/all-MiniLM-L6-v2` |
 | `DENSE_VECTOR_SIZE` | Dimension of dense vectors | `384` |
-| `USE_NOMIC_PREFIX` | Add Nomic prefixes to queries | `false` |
+| `USE_NOMIC_PREFIX` | Add Nomic prefixes (for Nomic models) | `false` |
 | `UPLOAD_DIR` | Directory for uploaded files | `/app/uploads` |
+| `PDF_TIMEOUT` | PDF processing timeout in seconds (Phase 4) | `600` |
+| `WORKER_PROCESSES` | Background workers for async uploads | `2` |
+
+**Remote Embeddings (GPU):**
+| `VLLM_EMBEDDING_URL` | vLLM server URL | *(empty)* |
+| `VLLM_MODEL_NAME` | Model name | `nomic-ai/nomic-embed-text-v1.5` |
+| `VLLM_API_KEY` | API key | *(empty)* |
+
+**PDF Processing (GPU):**
+| `OLMOCR_SERVER` | olmocr server URL | *(empty)* |
+| `OLMOCR_API_KEY` | API key | *(empty)* |
 
 > ℹ️ **Note:** The embedding model runs locally inside the container. No API keys or external services required for the default configuration!
 
@@ -138,8 +151,9 @@ Once connected, your LLM will have access to:
 
 ```bash
 # Check logs for errors
-docker-compose logs backend
+docker-compose logs dashboard
 docker-compose logs mcp-server
+docker-compose logs qdrant
 ```
 
 ### "Model loading failed" Error
@@ -155,11 +169,26 @@ memswap_limit: 6g
 
 ### PDF Upload Stuck
 
-PDF processing uses olmocr for layout analysis, which can be slow. Check processing status:
+PDF processing uses olmocr for layout analysis, which can be slow. For PDFs:
+- Small PDFs (<10MB): Synchronous processing
+- Large PDFs (>10MB): Automatically uses async endpoint (Phase 4)
+
+Check processing status:
 
 ```bash
-docker-compose logs -f backend
+# View dashboard logs
+docker-compose logs -f dashboard
+
+# Check for specific job
+curl http://localhost:8080/api/upload/status/YOUR_TASK_ID
 ```
+
+If stuck, check:
+1. PDF timeout setting: `PDF_TIMEOUT=600` (increase if needed)
+2. Worker processes: `WORKER_PROCESSES=2`
+3. Available memory: PDFs need 2-4GB RAM
+
+For persistent issues, see [troubleshooting.md](./troubleshooting.md#pdf-processing-issues)
 
 ---
 

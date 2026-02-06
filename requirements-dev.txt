@@ -1,0 +1,20 @@
+# SAGE Development & Testing Dependencies
+# =========================================
+# Install with: pip install -r requirements-dev.txt
+
+# Testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Test dependencies
+PyYAML>=6.0  # For docker-compose tests
+
+# Code quality
+ruff>=0.1.0  # Linting and formatting
+
+# Development utilities
+ipython>=8.12.0  # Interactive shell
+
+# Install core dependencies
+-r sage_core/requirements.txt

@@ -92,6 +92,39 @@ async def get_remote_embedding(text: str) -> List[float]:
     return response.json()["data"][0]["embedding"]
 
 
+def is_transient_error(error: Exception) -> bool:
+    """
+    Determine if an error is transient (should retry) or permanent (fail immediately).
+    
+    Transient errors:
+    - Network timeouts/connection errors
+    - Rate limits (429)
+    - Temporary service unavailability (503)
+    
+    Permanent errors:
+    - Authentication failures (401)
+    - Invalid requests (400)
+    - Not found (404)
+    """
+    if isinstance(error, httpx.RequestError):
+        # Network errors are transient
+        return True
+    
+    if isinstance(error, httpx.HTTPStatusError):
+        status_code = error.response.status_code
+        # 429 (rate limit), 503 (service unavailable) are transient
+        if status_code in [429, 503, 502, 504]:
+            return True
+        # 401 (auth), 400 (bad request), 404 (not found) are permanent
+        if status_code in [401, 400, 404, 403]:
+            return False
+        # Other 5xx errors might be transient
+        if 500 <= status_code < 600:
+            return True
+    
+    return False
+
+
 async def get_remote_embeddings_async(
     client: httpx.AsyncClient,
     texts: List[str]
@@ -122,6 +155,66 @@ async def get_remote_embeddings_async(
                 logger.error(f"Remote embedding failed after {retries} attempts: {e}")
                 raise
             await asyncio.sleep(1 * (attempt + 1))
+
+
+async def get_remote_embeddings_async_with_retry(
+    client: httpx.AsyncClient,
+    texts: List[str],
+    max_retries: int = 3
+) -> List[List[float]]:
+    """
+    Get embeddings from remote vLLM server with intelligent retry logic.
+    
+    Distinguishes between transient and permanent errors:
+    - Transient errors (network issues, rate limits) trigger exponential backoff
+    - Permanent errors (auth failures, invalid input) fail immediately
+    
+    Args:
+        client: HTTP client instance
+        texts: List of texts to embed
+        max_retries: Maximum number of retry attempts (default: 3)
+    
+    Returns:
+        List of embedding vectors
+    
+    Raises:
+        Exception: If all retries exhausted or permanent error encountered
+    """
+    if not texts:
+        return []
+
+    headers = {"Content-Type": "application/json"}
+    if VLLM_API_KEY:
+        headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
+
+    for attempt in range(max_retries):
+        try:
+            response = await client.post(
+                f"{VLLM_EMBEDDING_URL}/v1/embeddings",
+                json={"input": texts, "model": VLLM_MODEL_NAME},
+                headers=headers,
+                timeout=120.0
+            )
+            response.raise_for_status()
+            data = response.json()
+            sorted_data = sorted(data["data"], key=lambda x: x["index"])
+            return [item["embedding"] for item in sorted_data]
+            
+        except Exception as e:
+            # Check if error is transient
+            if not is_transient_error(e):
+                logger.error(f"Permanent error in embedding generation: {e}")
+                raise  # Fail immediately for permanent errors
+            
+            # For transient errors, retry with exponential backoff
+            if attempt == max_retries - 1:
+                logger.error(f"Remote embedding failed after {max_retries} attempts: {e}")
+                raise
+            
+            # Exponential backoff: 1s, 2s, 4s
+            delay = 2 ** attempt
+            logger.warning(f"Transient error in embedding (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {delay}s...")
+            await asyncio.sleep(delay)
 
 
 def close_http_client():
