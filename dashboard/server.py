@@ -163,7 +163,10 @@ async def lifespan(app: FastAPI):
     await get_dense_model()
     await get_bm25_model()
     client = await get_qdrant_client()
-    await ensure_collection(client)
+    # ensure_collection is now sync, but we are in async context.
+    # It does blocking calls. It's okay-ish for startup to block briefly,
+    # or we can run it in executor. But simplest is just call it.
+    ensure_collection(client)
     logger.info("Models loaded.")
     yield
     # Shutdown
@@ -183,7 +186,7 @@ app = FastAPI(
 # ============================================================
 
 @app.get("/api/status")
-async def get_status(
+def get_status(
     client: Annotated[QdrantClient, Depends(get_qdrant_client)]
 ) -> ConnectionStatus:
     """Check connection status to Qdrant."""
@@ -211,7 +214,7 @@ async def get_status(
 # ============================================================
 
 @app.post("/api/upload")
-async def upload_document(
+def upload_document(
     file: UploadFile = File(...),
     library: str = Form(...),
     version: str = Form(default="latest"),
@@ -223,9 +226,9 @@ async def upload_document(
     Supports: Markdown (.md), HTML (.html/.htm), Text (.txt), PDF (.pdf), ZIP (archives)
     """
     try:
-        content = await file.read()
+        content = file.file.read()
         
-        result = await ingest_document(
+        result = ingest_document(
             client=client,
             content=content,
             filename=file.filename,
@@ -248,7 +251,7 @@ async def upload_document(
 
 
 @app.post("/api/upload-multiple")
-async def upload_multiple_documents(
+def upload_multiple_documents(
     files: list[UploadFile] = File(...),
     library: str = Form(...),
     version: str = Form(default="latest"),
@@ -260,8 +263,8 @@ async def upload_multiple_documents(
         total_chunks = 0
         
         for file in files:
-            content = await file.read()
-            result = await ingest_document(
+            content = file.file.read()
+            result = ingest_document(
                 client=client,
                 content=content,
                 filename=file.filename,
@@ -287,46 +290,34 @@ async def upload_multiple_documents(
 
 def _process_upload_background(task_id: str, content: bytes, filename: str, library: str, version: str):
     """Background worker for processing uploads (runs in separate thread)."""
-    import asyncio
-    
-    def run_async():
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            _upload_tasks[task_id]["status"] = "processing"
-            _upload_tasks[task_id]["progress"] = "Converting document..."
-            
-            # Note: Background tasks need their own client instance or thread-safe handling
-            # Ideally we pass a factory or handle this better, but for now we re-instantiate or use global if safe
-            # Since get_qdrant_client is now async and uses global, we might need a sync wrapper or use sync client for thread
-            # For simplicity in this refactor, we'll create a new client for the thread
-            client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
-            result = loop.run_until_complete(ingest_document(
-                client=client,
-                content=content,
-                filename=filename,
-                library=library,
-                version=version
-            ))
-            
-            _upload_tasks[task_id]["status"] = "completed"
-            _upload_tasks[task_id]["progress"] = "Complete"
-            _upload_tasks[task_id]["result"] = UploadResult(
-                success=True,
-                library=result["library"],
-                version=result["version"],
-                files_processed=result["files_processed"],
-                chunks_indexed=result["chunks_indexed"],
-                message=f"Successfully indexed {result['chunks_indexed']} chunks"
-            )
-        except Exception as e:
-            logger.error(f"Background upload failed: {e}")
-            _upload_tasks[task_id]["status"] = "failed"
-            _upload_tasks[task_id]["error"] = str(e)
-        finally:
-            loop.close()
-    
-    run_async()
+    try:
+        _upload_tasks[task_id]["status"] = "processing"
+        _upload_tasks[task_id]["progress"] = "Converting document..."
+
+        # Create a new client for this thread
+        client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        result = ingest_document(
+            client=client,
+            content=content,
+            filename=filename,
+            library=library,
+            version=version
+        )
+
+        _upload_tasks[task_id]["status"] = "completed"
+        _upload_tasks[task_id]["progress"] = "Complete"
+        _upload_tasks[task_id]["result"] = UploadResult(
+            success=True,
+            library=result["library"],
+            version=result["version"],
+            files_processed=result["files_processed"],
+            chunks_indexed=result["chunks_indexed"],
+            message=f"Successfully indexed {result['chunks_indexed']} chunks"
+        )
+    except Exception as e:
+        logger.error(f"Background upload failed: {e}")
+        _upload_tasks[task_id]["status"] = "failed"
+        _upload_tasks[task_id]["error"] = str(e)
 
 
 @app.post("/api/upload/async")
@@ -385,14 +376,14 @@ async def get_upload_status(task_id: str) -> UploadStatus:
 
 
 @app.delete("/api/library/{library}")
-async def remove_library(
+def remove_library(
     library: str, 
     version: Optional[str] = None,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DeleteResult:
     """Delete a library (and optionally specific version) from the index."""
     try:
-        deleted_count = await delete_library(client, library, version)
+        deleted_count = delete_library(client, library, version)
         
         return DeleteResult(
             success=True,
@@ -411,7 +402,7 @@ async def remove_library(
 # ============================================================
 
 @app.get("/api/libraries")
-async def list_libraries(
+def list_libraries(
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> list[LibraryInfo]:
     """List all indexed libraries and their versions.
@@ -490,7 +481,7 @@ async def list_libraries(
 
 
 @app.post("/api/search")
-async def search_docs(
+def search_docs(
     request: SearchRequest,
     client: QdrantClient = Depends(get_qdrant_client),
     bm25_model: SparseTextEmbedding = Depends(get_bm25_model),
@@ -574,7 +565,7 @@ async def search_docs(
 
 
 @app.post("/api/resolve")
-async def resolve_library(
+def resolve_library(
     request: ResolveRequest,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> list[ResolveResult]:
@@ -675,7 +666,7 @@ async def resolve_library(
 
 
 @app.get("/api/document")
-async def get_document(
+def get_document(
     file_path: str,
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DocumentResult:

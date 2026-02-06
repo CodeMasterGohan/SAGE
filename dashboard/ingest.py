@@ -516,7 +516,7 @@ def process_zip(
     return files
 
 
-async def ingest_document(
+def ingest_document(
     client: QdrantClient,
     content: bytes,
     filename: str,
@@ -532,7 +532,7 @@ async def ingest_document(
     logger.info(f"Ingesting document: {filename} for library {library} v{version}")
     
     # Ensure collection exists
-    await ensure_collection(client)
+    ensure_collection(client)
     
     # Detect file type
     file_type = detect_file_type(filename, content)
@@ -542,7 +542,7 @@ async def ingest_document(
         files = process_zip(content, library, version)
         total_chunks = 0
         for fname, markdown in files:
-            chunks = await _ingest_markdown(client, markdown, fname, library, version)
+            chunks = _ingest_markdown(client, markdown, fname, library, version)
             total_chunks += chunks
         return {
             "library": library,
@@ -553,7 +553,7 @@ async def ingest_document(
     else:
         # Process single file
         markdown = process_file(content, filename, library, version)
-        chunks = await _ingest_markdown(client, markdown, filename, library, version)
+        chunks = _ingest_markdown(client, markdown, filename, library, version)
         return {
             "library": library,
             "version": version,
@@ -562,7 +562,7 @@ async def ingest_document(
         }
 
 
-async def _ingest_markdown(
+def _ingest_markdown(
     client: QdrantClient,
     markdown: str,
     filename: str,
@@ -579,7 +579,9 @@ async def _ingest_markdown(
     # Use Vault for processing if available
     if VAULT_AVAILABLE:
         logger.info(f"Using Vault for async processing: {filename}")
-        result = await vault_process_document(
+
+        import asyncio
+        result = asyncio.run(vault_process_document(
             client=client,
             content=markdown,
             filename=filename,
@@ -587,7 +589,7 @@ async def _ingest_markdown(
             version=version,
             title=title,
             file_path=str(file_path)
-        )
+        ))
         return result.get("chunks_indexed", 0)
     
     # Fallback: Use local processing if Vault not available
@@ -691,7 +693,7 @@ def save_uploaded_file(content: bytes, filename: str, library: str, version: str
     return file_path
 
 
-async def ensure_collection(client: QdrantClient):
+def ensure_collection(client: QdrantClient):
     """Ensure the collection exists with proper configuration."""
     collections = client.get_collections().collections
     exists = any(c.name == COLLECTION_NAME for c in collections)
@@ -742,7 +744,7 @@ async def ensure_collection(client: QdrantClient):
         logger.info(f"Collection {COLLECTION_NAME} created successfully")
 
 
-async def delete_library(client: QdrantClient, library: str, version: str = None) -> int:
+def delete_library(client: QdrantClient, library: str, version: str = None) -> int:
     """Delete a library (and optionally specific version) from the index."""
     filter_conditions = [
         models.FieldCondition(
