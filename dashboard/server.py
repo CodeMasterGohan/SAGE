@@ -418,38 +418,49 @@ async def list_libraries(
     
     Optimized: Uses 2 facet queries instead of N+1 (one per library).
     """
+    import asyncio
     
     try:
+        def fetch_library_facets():
+            return client.facet(
+                collection_name=COLLECTION_NAME,
+                key="library",
+                limit=1000
+            )
+
         # Query 1: Get all unique libraries
-        library_facets = client.facet(
-            collection_name=COLLECTION_NAME,
-            key="library",
-            limit=1000
-        )
+        library_facets = await asyncio.to_thread(fetch_library_facets)
         
         if not library_facets.hits:
             return []
         
-        # Query 2: Get ALL versions in a single call (no filter)
-        # This avoids N separate queries for each library
-        version_facets = client.facet(
-            collection_name=COLLECTION_NAME,
-            key="version",
-            limit=1000
-        )
+        def fetch_version_facets():
+            # Query 2: Get ALL versions in a single call (no filter)
+            # This avoids N separate queries for each library
+            return client.facet(
+                collection_name=COLLECTION_NAME,
+                key="version",
+                limit=1000
+            )
+
+        version_facets = await asyncio.to_thread(fetch_version_facets)
         
         # Build library-version mapping using scroll with minimal payload
         # We need to know which versions belong to which libraries
         # Scroll a sample of points to build the mapping efficiently
         library_versions: dict[str, set[str]] = {hit.value: set() for hit in library_facets.hits}
         
+        def fetch_scroll_data(offset=None):
+            return client.scroll(
+                collection_name=COLLECTION_NAME,
+                offset=offset,
+                limit=2000,  # Reasonable batch
+                with_payload=["library", "version"],
+                with_vectors=False
+            )
+
         # Use scroll to get library-version pairs with minimal data
-        results, next_offset = client.scroll(
-            collection_name=COLLECTION_NAME,
-            limit=2000,  # Reasonable batch
-            with_payload=["library", "version"],
-            with_vectors=False
-        )
+        results, next_offset = await asyncio.to_thread(fetch_scroll_data)
         
         for point in results:
             lib = point.payload.get("library")
@@ -459,13 +470,7 @@ async def list_libraries(
         
         # While there are more results, continue scrolling
         while next_offset and len(results) == 2000:
-            results, next_offset = client.scroll(
-                collection_name=COLLECTION_NAME,
-                offset=next_offset,
-                limit=2000,
-                with_payload=["library", "version"],
-                with_vectors=False
-            )
+            results, next_offset = await asyncio.to_thread(fetch_scroll_data, next_offset)
             for point in results:
                 lib = point.payload.get("library")
                 ver = point.payload.get("version")
@@ -497,13 +502,18 @@ async def search_docs(
     dense_model: TextEmbedding = Depends(get_dense_model)
 ) -> list[SearchResult]:
     """Search documentation using hybrid semantic + keyword search."""
+    import asyncio
     
     # Apply Nomic prefix if needed
     query_for_embed = f"search_query: {request.query}" if USE_NOMIC_PREFIX else request.query
     
-    # Generate embeddings
-    dense_vector = list(dense_model.embed([query_for_embed]))[0].tolist()
-    sparse_embedding = list(bm25_model.embed([request.query]))[0]
+    # Generate embeddings asynchronously using to_thread
+    def generate_embeddings():
+        dense_vec = list(dense_model.embed([query_for_embed]))[0].tolist()
+        sparse_vec = list(bm25_model.embed([request.query]))[0]
+        return dense_vec, sparse_vec
+
+    dense_vector, sparse_embedding = await asyncio.to_thread(generate_embeddings)
     
     # Build filter conditions
     filter_conditions = []
@@ -529,8 +539,8 @@ async def search_docs(
     # Select fusion method
     fusion_type = models.Fusion.DBSF if request.fusion.lower() == "dbsf" else models.Fusion.RRF
     
-    try:
-        results = client.query_points(
+    def perform_search():
+        return client.query_points(
             collection_name=COLLECTION_NAME,
             prefetch=[
                 models.Prefetch(
@@ -552,6 +562,9 @@ async def search_docs(
             limit=request.limit,
             with_payload=True
         )
+
+    try:
+        results = await asyncio.to_thread(perform_search)
         
         formatted = []
         for point in results.points:
@@ -582,15 +595,19 @@ async def resolve_library(
     
     Optimized: Fetches versions for top matches in a single scroll query.
     """
+    import asyncio
     query_lower = request.query.lower()
     
     try:
-        # Get all libraries using facet API
-        library_facets = client.facet(
-            collection_name=COLLECTION_NAME,
-            key="library",
-            limit=1000
-        )
+        def fetch_libraries():
+            # Get all libraries using facet API
+            return client.facet(
+                collection_name=COLLECTION_NAME,
+                key="library",
+                limit=1000
+            )
+
+        library_facets = await asyncio.to_thread(fetch_libraries)
         
         # Score all libraries
         scored = []
@@ -641,13 +658,16 @@ async def resolve_library(
             ]
         )
         
-        results, next_offset = client.scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=scroll_filter,
-            limit=1000,
-            with_payload=["library", "version"],
-            with_vectors=False
-        )
+        def fetch_versions():
+            return client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=scroll_filter,
+                limit=1000,
+                with_payload=["library", "version"],
+                with_vectors=False
+            )
+
+        results, next_offset = await asyncio.to_thread(fetch_versions)
         
         for point in results:
             lib = point.payload.get("library")
@@ -656,18 +676,18 @@ async def resolve_library(
                 library_versions[lib].add(ver)
         
         # Build final results
-        results = []
+        final_results = []
         for match in top_matches:
             lib_name = match["library"]
             versions = sorted(library_versions.get(lib_name, set()), reverse=True)[:10]
-            results.append(ResolveResult(
+            final_results.append(ResolveResult(
                 library=lib_name,
                 doc_count=match["doc_count"],
                 relevance_score=match["relevance_score"],
                 versions=versions
             ))
         
-        return results
+        return final_results
         
     except Exception as e:
         logger.error(f"Failed to resolve library: {e}")
@@ -680,21 +700,25 @@ async def get_document(
     client: QdrantClient = Depends(get_qdrant_client)
 ) -> DocumentResult:
     """Get the full content of a specific document by its file path."""
+    import asyncio
     
     try:
-        results, _ = client.scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=models.Filter(
-                must=[
-                    models.FieldCondition(
-                        key="file_path",
-                        match=models.MatchValue(value=file_path)
-                    )
-                ]
-            ),
-            limit=100,
-            with_payload=True
-        )
+        def fetch_document():
+            return client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=models.Filter(
+                    must=[
+                        models.FieldCondition(
+                            key="file_path",
+                            match=models.MatchValue(value=file_path)
+                        )
+                    ]
+                ),
+                limit=100,
+                with_payload=True
+            )
+
+        results, _ = await asyncio.to_thread(fetch_document)
         
         if not results:
             raise HTTPException(status_code=404, detail=f"Document not found: {file_path}")

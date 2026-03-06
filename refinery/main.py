@@ -91,9 +91,9 @@ def detect_file_type(filename: str, content: bytes) -> str:
     """Detect file type based on extension and content."""
     ext = Path(filename).suffix.lower()
     
-    if ext == '.md' or ext == '.markdown':
+    if ext in {'.md', '.markdown'}:
         return 'markdown'
-    elif ext in ['.html', '.htm']:
+    elif ext in {'.html', '.htm'}:
         return 'html'
     elif ext == '.txt':
         return 'text'
@@ -103,9 +103,9 @@ def detect_file_type(filename: str, content: bytes) -> str:
         return 'zip'
     elif ext == '.docx':
         return 'docx'
-    elif ext in ['.xlsx', '.xls']:
+    elif ext in {'.xlsx', '.xls'}:
         return 'excel'
-    elif ext in ['.rst', '.asciidoc', '.adoc']:
+    elif ext in {'.rst', '.asciidoc', '.adoc'}:
         return 'text'  # Treat as plain text
     else:
         # Try to detect from content
@@ -398,7 +398,7 @@ def process_zip(
                 
                 # Skip non-document files
                 ext = Path(name).suffix.lower()
-                if ext not in ['.md', '.markdown', '.html', '.htm', '.txt', '.pdf', '.rst', '.docx', '.xlsx', '.xls']:
+                if ext not in {'.md', '.markdown', '.html', '.htm', '.txt', '.pdf', '.rst', '.docx', '.xlsx', '.xls'}:
                     continue
                 
                 try:
