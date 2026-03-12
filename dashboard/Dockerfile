@@ -16,13 +16,6 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install runtime dependencies for olmocr
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    poppler-utils \
-    fonts-freefont-ttf \
-    fonts-liberation \
-    && rm -rf /var/lib/apt/lists/*
-
 # Create non-root user with fixed UID to match host
 RUN groupadd -g 1000 app && \
     useradd -u 1000 -g app -s /sbin/nologin -d /app app

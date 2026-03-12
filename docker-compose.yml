@@ -1,3 +1,21 @@
+x-shared-env: &shared-env
+  QDRANT_HOST: qdrant
+  QDRANT_PORT: 6333
+  COLLECTION_NAME: sage_docs
+  # Embedding settings
+  EMBEDDING_MODE: remote
+  DENSE_MODEL_NAME: sentence-transformers/all-MiniLM-L6-v2
+  DENSE_VECTOR_SIZE: 384
+  USE_NOMIC_PREFIX: false
+  # Remote vLLM embeddings (optional - set EMBEDDING_MODE=remote to use)
+  VLLM_EMBEDDING_URL: ${VLLM_EMBEDDING_URL:-}
+  VLLM_MODEL_NAME: ${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
+  VLLM_API_KEY: ${VLLM_API_KEY:-}
+  # olmocr PDF processing (set OLMOCR_SERVER for remote instance)
+  OLMOCR_SERVER: ${OLMOCR_SERVER:-} # e.g., http://olmocr:8000/v1 or https://api.deepinfra.com/v1/openai
+  OLMOCR_API_KEY: ${OLMOCR_API_KEY:-}
+  OLMOCR_MODEL: ${OLMOCR_MODEL:-allenai/olmOCR-2-7B-1025-FP8}
+
 services:
   qdrant:
     image: qdrant/qdrant:latest
@@ -19,23 +37,8 @@ services:
       - ./uploads:/app/uploads
       - ./dashboard/static:/app/static
     environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - COLLECTION_NAME=sage_docs
-      - UPLOAD_DIR=/app/uploads
-      # Embedding settings
-      - EMBEDDING_MODE=local
-      - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-      - DENSE_VECTOR_SIZE=384
-      - USE_NOMIC_PREFIX=false
-      # Remote vLLM embeddings (optional - set EMBEDDING_MODE=remote to use)
-      - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
-      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
-      - VLLM_API_KEY=${VLLM_API_KEY:-}
-      # olmocr PDF processing (set OLMOCR_SERVER for remote instance)
-      - OLMOCR_SERVER=${OLMOCR_SERVER:-} # e.g., http://olmocr:8000/v1 or https://api.deepinfra.com/v1/openai
-      - OLMOCR_API_KEY=${OLMOCR_API_KEY:-}
-      - OLMOCR_MODEL=${OLMOCR_MODEL:-allenai/olmOCR-2-7B-1025-FP8}
+      <<: *shared-env
+      UPLOAD_DIR: /app/uploads
     mem_limit: 6g
     memswap_limit: 8g
     restart: unless-stopped
@@ -48,18 +51,8 @@ services:
     volumes:
       - ./uploads:/app/uploads
     environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - COLLECTION_NAME=sage_docs
-      - UPLOAD_DIR=/app/uploads
-      - EMBEDDING_MODE=local
-      - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-      - DENSE_VECTOR_SIZE=384
-      - USE_NOMIC_PREFIX=false
-      # olmocr PDF processing (set OLMOCR_SERVER for remote instance)
-      - OLMOCR_SERVER=${OLMOCR_SERVER:-}
-      - OLMOCR_API_KEY=${OLMOCR_API_KEY:-}
-      - OLMOCR_MODEL=${OLMOCR_MODEL:-allenai/olmOCR-2-7B-1025-FP8}
+      <<: *shared-env
+      UPLOAD_DIR: /app/uploads
     restart: unless-stopped
 
   vault:
@@ -70,21 +63,9 @@ services:
     volumes:
       - ./uploads:/app/uploads
     environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - COLLECTION_NAME=sage_docs
-      # Embedding settings (must match dashboard)
-      - EMBEDDING_MODE=local
-      - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-      - DENSE_VECTOR_SIZE=384
-      - USE_NOMIC_PREFIX=false
-      # Remote vLLM embeddings (optional)
-      - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
-      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
-      - VLLM_API_KEY=${VLLM_API_KEY:-}
-      # Batching configuration
-      - MAX_BATCH_TOKENS=2000
-      - VAULT_CONCURRENCY=${VAULT_CONCURRENCY:-}
+      <<: *shared-env
+      MAX_BATCH_TOKENS: 2000
+      VAULT_CONCURRENCY: ${VAULT_CONCURRENCY:-}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: "no"
@@ -98,16 +79,7 @@ services:
       - "8000:8000"
       - "8090:8080"
     environment:
-      - QDRANT_HOST=qdrant
-      - QDRANT_PORT=6333
-      - COLLECTION_NAME=sage_docs
-      - EMBEDDING_MODE=local
-      - DENSE_MODEL_NAME=sentence-transformers/all-MiniLM-L6-v2
-      - USE_NOMIC_PREFIX=false
-      # Remote vLLM embeddings (optional)
-      - VLLM_EMBEDDING_URL=${VLLM_EMBEDDING_URL:-}
-      - VLLM_MODEL_NAME=${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
-      - VLLM_API_KEY=${VLLM_API_KEY:-}
+      <<: *shared-env
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped

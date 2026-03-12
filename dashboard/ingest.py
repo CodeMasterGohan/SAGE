@@ -242,71 +242,79 @@ def convert_html_to_markdown(html_content: str) -> str:
 
 
 def extract_pdf_text(pdf_content: bytes) -> str:
-    """Extract text from PDF file using olmocr for layout preservation."""
-    import tempfile
+    """Extract text from PDF file by calling the remote olmocr server."""
+    import httpx
     
     # olmocr configuration from environment
     olmocr_server = os.getenv("OLMOCR_SERVER", "")  # External vLLM server URL
     olmocr_api_key = os.getenv("OLMOCR_API_KEY", "")  # API key for external providers
     olmocr_model = os.getenv("OLMOCR_MODEL", "allenai/olmOCR-2-7B-1025-FP8")
     
+    if not olmocr_server:
+        logger.error("OLMOCR_SERVER environment variable is not set. Cannot process PDF.")
+        return ""
+        
     try:
-        # Write PDF to temp file
-        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
-            tmp.write(pdf_content)
-            tmp_path = tmp.name
+        logger.info(f"Sending PDF to remote olmocr server at {olmocr_server}...")
         
-        # Create workspace for olmocr output
-        workspace = tempfile.mkdtemp(prefix="olmocr_")
+        # Different remote endpoints might have different APIs.
+        # Assuming an endpoint that takes the PDF as a file upload.
+        # DeepInfra and similar APIs usually just follow OpenAI / chat completions or custom endpoint.
+        # Since the exact API depends on the server (e.g. standard vLLM doesn't support PDF directly,
+        # olmocr custom server might support a /v1/chat/completions or /v1/pdf), we send it via multipart/form-data.
         
-        logger.info("Converting PDF with olmocr (this may take a while)...")
-        
-        # Build command
-        cmd = [
-            "python", "-m", "olmocr.pipeline", workspace,
-            "--markdown", "--pdfs", tmp_path,
-            "--model", olmocr_model
-        ]
-        
-        # Add server/API configuration if provided
-        if olmocr_server:
-            cmd.extend(["--server", olmocr_server])
+        headers = {}
         if olmocr_api_key:
-            cmd.extend(["--api_key", olmocr_api_key])
+            headers["Authorization"] = f"Bearer {olmocr_api_key}"
+
+        # Try custom olmocr API if there's a specific endpoint, otherwise a generic file upload
+        # Usually, a custom server for olmocr exposes an endpoint like `/process` or similar.
+        # Based on standard olmocr API, we'll POST to the base URL or /v1/chat/completions.
         
-        # Run olmocr pipeline
-        result = subprocess.run(
-            cmd,
-            capture_output=True,
-            text=True,
-            timeout=600  # 10 minute timeout for large PDFs
-        )
+        # The typical olmocr client sends base64 or multipart. Let's use multipart.
+        files = {
+            "file": ("document.pdf", pdf_content, "application/pdf")
+        }
         
-        if result.returncode != 0:
-            logger.error(f"olmocr failed: {result.stderr}")
-            return ""
+        data = {
+            "model": olmocr_model
+        }
         
-        # Read generated markdown
-        pdf_stem = Path(tmp_path).stem
-        md_file = Path(workspace) / "markdown" / f"{pdf_stem}.md"
-        
-        if md_file.exists():
-            markdown = md_file.read_text()
+        # We append a default endpoint if it's just a base URL.
+        url = olmocr_server.rstrip("/")
+        if not url.endswith("process") and not url.endswith("v1"):
+            url = f"{url}/process"
+
+        with httpx.Client(timeout=600) as client:
+            response = client.post(
+                url,
+                headers=headers,
+                files=files,
+                data=data
+            )
+            response.raise_for_status()
+
+            # The exact response format depends on the server. We try to extract markdown.
+            resp_data = response.json()
+
+            # Try a few common response formats
+            if "markdown" in resp_data:
+                markdown = resp_data["markdown"]
+            elif "text" in resp_data:
+                markdown = resp_data["text"]
+            elif "choices" in resp_data and len(resp_data["choices"]) > 0:
+                markdown = resp_data["choices"][0].get("message", {}).get("content", "")
+            else:
+                markdown = str(resp_data)
+
             logger.info(f"PDF conversion complete: {len(markdown)} chars")
-        else:
-            logger.warning(f"olmocr did not produce markdown output for {tmp_path}")
-            markdown = ""
-        
-        # Clean up
-        os.remove(tmp_path)
-        shutil.rmtree(workspace, ignore_errors=True)
-        
-        return markdown
-    except subprocess.TimeoutExpired:
-        logger.error("olmocr timed out processing PDF")
+            return markdown
+
+    except httpx.TimeoutException:
+        logger.error("Remote olmocr server timed out processing PDF")
         return ""
     except Exception as e:
-        logger.error(f"Error extracting PDF with olmocr: {e}")
+        logger.error(f"Error extracting PDF with remote olmocr: {e}")
         return ""
 
 
