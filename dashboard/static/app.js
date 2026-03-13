@@ -489,7 +489,7 @@ async function performSearch() {
         });
 
         const results = await response.json();
-        renderResults(results);
+        renderResults(results, query);
     } catch (error) {
         console.error('Search failed:', error);
         showError('Search failed. Please try again.');
@@ -535,7 +535,7 @@ function hideSuggestions() {
     searchSuggestions.classList.add('hidden');
 }
 
-function renderResults(results) {
+function renderResults(results, currentQuery = '') {
     hideAllStates();
 
     if (results.length === 0) {
@@ -575,7 +575,7 @@ function renderResults(results) {
       <div class="flex-1 p-5">
         <h3 class="text-lg font-medium text-white mb-2">${escapeHtml(result.title || 'Untitled')}</h3>
         <p class="text-gray-400 text-sm mb-4 leading-relaxed line-clamp-3">
-          ${escapeHtml(truncateText(result.content, 200))}
+          ${currentQuery ? highlightSearchTerms(truncateText(result.content, 200), currentQuery) : escapeHtml(truncateText(result.content, 200))}
         </p>
         
         <!-- Code Preview -->
@@ -622,7 +622,7 @@ async function viewDocument(filePath) {
           </button>
         </div>
         <div class="flex-1 overflow-y-auto p-6">
-          <pre class="text-sm text-gray-300 whitespace-pre-wrap font-mono">${escapeHtml(doc.content)}</pre>
+          <div class="prose prose-sm prose-invert max-w-none text-gray-300 font-sans">${marked.parse(doc.content)}</div>
         </div>
       </div>
     `;
@@ -676,6 +676,21 @@ function truncateText(text, maxLength) {
     if (!text) return '';
     if (text.length <= maxLength) return text;
     return text.substring(0, maxLength) + '...';
+}
+
+function highlightSearchTerms(text, query) {
+    if (!text) return '';
+    if (!query) return escapeHtml(text);
+
+    // First escape the text
+    const escapedText = escapeHtml(text);
+
+    // Also escape the query since it will be matching against the escaped text
+    const escapedQuery = escapeHtml(query).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+    // Match the exact query, case-insensitive
+    const regex = new RegExp(`(${escapedQuery})`, 'gi');
+    return escapedText.replace(regex, '<mark class="bg-cyan-900/60 text-cyan-200 px-1 rounded font-medium shadow-[0_0_8px_rgba(34,211,238,0.2)]">$1</mark>');
 }
 
 function highlightCode(code) {

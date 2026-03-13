@@ -21,6 +21,7 @@ import time
 import logging
 import argparse
 import asyncio
+import hashlib
 from typing import Optional, List, Dict, Any
 
 from mcp.server.fastmcp import FastMCP
@@ -156,8 +157,34 @@ async def get_remote_embedding(text: str) -> list[float]:
 
 
 # ============================================================
-# Search Helper
+# Search Helper & Cache
 # ============================================================
+
+_search_cache = {}
+CACHE_TTL = 300  # 5 minutes
+
+async def _do_search_cached(query: str, library: str, version: str, limit: int, rerank: bool, fusion: str) -> List[Dict]:
+    """Cached wrapper around the search module."""
+    cache_key = hashlib.md5(f"{query}:{library}:{version}:{limit}:{rerank}:{fusion}".encode()).hexdigest()
+    now = time.time()
+    
+    if cache_key in _search_cache:
+        cached_results, timestamp = _search_cache[cache_key]
+        if now - timestamp < CACHE_TTL:
+            logger.info("Search cache hit")
+            return [dict(r) for r in cached_results]
+            
+    results = await _do_search(query, library, version, limit, rerank, fusion)
+    _search_cache[cache_key] = (results, now)
+    
+    if len(_search_cache) > 1000:
+        oldkeys = [k for k, (_, t) in _search_cache.items() if now - t > CACHE_TTL]
+        for k in oldkeys:
+            del _search_cache[k]
+        if len(_search_cache) > 1000:
+            _search_cache.clear()
+            
+    return [dict(r) for r in results]
 
 async def _do_search(query: str, library: str, version: str, limit: int, rerank: bool, fusion: str) -> List[Dict]:
     """Wrapper that injects dependencies into the search module."""
@@ -190,7 +217,8 @@ async def search_docs(
     version: str = None,
     limit: int = 5,
     rerank: bool = False,
-    fusion: str = "dbsf"
+    fusion: str = "dbsf",
+    context_chunks: int = 0
 ) -> Dict[str, Any]:
     """
     Agent-Optimized Documentation Search.
@@ -207,6 +235,7 @@ async def search_docs(
         limit: Max results.
         rerank: Enable ColBERT reranking (slower, more accurate).
         fusion: "dbsf" (default) or "rrf".
+        context_chunks: Include surrounding content chunks by fetching specific indexes.
     
     Returns:
         Dict containing "results" and "meta" (explaining how the search was resolved).
@@ -274,7 +303,7 @@ async def search_docs(
     
     # 2. Execute Search
     tasks = [
-        _do_search(query=query, library=lib_target, version=version, limit=limit, rerank=rerank, fusion=fusion)
+        _do_search_cached(query=query, library=lib_target, version=version, limit=limit, rerank=rerank, fusion=fusion)
         for lib_target in target_libraries
     ]
     
@@ -291,7 +320,7 @@ async def search_docs(
     # 3. Fallback
     if not final_results and all(l is not None for l in target_libraries):
         logger.info("Targeted search failed. Attempting global fallback.")
-        fallback_results = await _do_search(
+        fallback_results = await _do_search_cached(
             query=query, library=None, version=None, limit=limit, rerank=rerank, fusion=fusion
         )
         if fallback_results:
@@ -300,6 +329,43 @@ async def search_docs(
             final_results = fallback_results
             meta["resolution_method"] += "_fallback_to_global"
             
+    # 4. Context Windows
+    if context_chunks > 0 and final_results:
+        client = get_qdrant_client()
+        loop = asyncio.get_running_loop()
+        
+        for res in final_results:
+            file_path = res.get("file_path")
+            chunk_idx = res.get("chunk_index")
+            if file_path and chunk_idx is not None:
+                start_idx = max(0, chunk_idx - context_chunks)
+                end_idx = chunk_idx + context_chunks
+                
+                try:
+                    adj_results, _ = await loop.run_in_executor(
+                        None,
+                        lambda fp=file_path, si=start_idx, ei=end_idx: client.scroll(
+                            collection_name=COLLECTION_NAME,
+                            scroll_filter=models.Filter(
+                                must=[
+                                    models.FieldCondition(key="file_path", match=models.MatchValue(value=fp)),
+                                    models.FieldCondition(key="chunk_index", range=models.Range(gte=si, lte=ei))
+                                ]
+                            ),
+                            limit=context_chunks * 2 + 1,
+                            with_payload=["content", "chunk_index"],
+                            with_vectors=False
+                        )
+                    )
+                    
+                    if adj_results:
+                        adj_chunks = sorted(adj_results, key=lambda p: p.payload.get("chunk_index", 0))
+                        merged_content = "\n\n".join(p.payload.get("content", "") for p in adj_chunks)
+                        res["content"] = merged_content
+                        res["context_added"] = f"Included chunks {start_idx} to {end_idx}"
+                except Exception as e:
+                    logger.warning(f"Failed to fetch context for {file_path}: {e}")
+
     meta["latency_ms"] = int((time.time() - start_time) * 1000)
     
     return {

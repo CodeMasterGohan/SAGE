@@ -191,6 +191,7 @@ async def perform_search_workflow(
                 "title": payload.get("title", ""),
                 "file_path": payload.get("file_path", ""),
                 "type": payload.get("type", ""),
+                "chunk_index": payload.get("chunk_index"),
                 "score": point.score,
                 # Tag the source library for multi-search merging
                 "source_context": library if library else "GLOBAL"
