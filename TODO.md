@@ -1,0 +1,7 @@
+# TODO: MCP Test Suite Implementation
+
+- [x] **Task 1: Setup Test Directory & Dependencies**
+- [ ] **Task 2: Define Comprehensive Architectural Research Scenarios**
+- [ ] **Task 3: Implement MCP Client Runner with Full Orchestration**
+- [ ] **Task 4: Implement Comprehensive Scoring**
+- [ ] **Task 5: Create Test Entry Point with Parameterized Scenarios**
