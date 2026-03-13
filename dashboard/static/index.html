@@ -286,13 +286,13 @@
                 <div id="dropZone" class="upload-zone rounded-xl p-12 text-center cursor-pointer"
                     onclick="document.getElementById('fileInput').click()">
                     <input id="fileInput" type="file" multiple
-                        accept=".md,.markdown,.html,.htm,.txt,.pdf,.zip,.docx,.xlsx,.xls" class="hidden" />
+                        accept=".md,.markdown,.html,.htm,.txt,.pdf,.zip,.docx,.xlsx,.xls,.png,.jpg,.jpeg" class="hidden" />
                     <div
                         class="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-cyan-900/30 to-blue-900/30 flex items-center justify-center">
                         <i class="fa-solid fa-cloud-arrow-up text-4xl text-cyan-400"></i>
                     </div>
                     <h3 class="text-lg font-semibold text-gray-300 mb-2">Drop files here or click to browse</h3>
-                    <p class="text-gray-500 text-sm mb-4">Supports Markdown, HTML, Text, PDF, DOCX, Excel, and ZIP
+                    <p class="text-gray-500 text-sm mb-4">Supports Markdown, HTML, Text, PDF, DOCX, Excel, Images, and ZIP
                         archives</p>
                     <div class="flex justify-center gap-2 flex-wrap">
                         <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.md</span>
@@ -301,12 +301,14 @@
                         <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.pdf</span>
                         <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.docx</span>
                         <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.xlsx</span>
+                        <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.png</span>
+                        <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.jpg</span>
                         <span class="px-2 py-1 bg-gray-800 rounded text-xs text-gray-400">.zip</span>
                     </div>
                     <div class="mt-4 p-3 bg-amber-900/20 border border-amber-700/30 rounded-lg">
                         <p class="text-amber-400 text-xs">
                             <i class="fa-solid fa-clock mr-1"></i>
-                            <strong>Note:</strong> PDF files may take longer to process due to layout analysis.
+                            <strong>Note:</strong> PDF and Image files may take longer to process due to layout analysis.
                             You can close this page—processing will continue in the background.
                         </p>
                     </div>

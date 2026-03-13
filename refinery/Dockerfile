@@ -20,6 +20,12 @@ WORKDIR /app
 RUN groupadd -g 1000 app && \
     useradd -u 1000 -g app -s /sbin/nologin -d /app app
 
+# Install system dependencies required by olmOCR (poppler for PDF rendering)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+
 # Install python dependencies from builder
 COPY --from=builder /app/wheels /wheels
 COPY --from=builder /app/requirements.txt .

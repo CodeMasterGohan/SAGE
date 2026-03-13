@@ -159,12 +159,12 @@ async function handleFileUpload(files) {
     let hasErrors = false;
 
     for (const file of files) {
-        const isPDF = file.name.toLowerCase().endsWith('.pdf');
+        const isAsyncUpload = file.name.toLowerCase().endsWith('.pdf') || file.name.toLowerCase().match(/\.(png|jpe?g)$/);
 
         // Update status
         uploadFileName.textContent = file.name;
-        uploadStatus.textContent = isPDF
-            ? 'Starting PDF processing (this may take a while)...'
+        uploadStatus.textContent = isAsyncUpload
+            ? 'Starting vision processing (this may take a while)...'
             : 'Uploading...';
 
         try {
@@ -173,8 +173,8 @@ async function handleFileUpload(files) {
             formData.append('library', library);
             formData.append('version', version);
 
-            if (isPDF) {
-                // Use async endpoint for PDFs
+            if (isAsyncUpload) {
+                // Use async endpoint for PDFs and Images
                 uploadStatus.textContent = 'Sending to server...';
 
                 const asyncResponse = await fetch('/api/upload/async', {
@@ -327,6 +327,8 @@ async function deleteLibrary(library) {
     }
 }
 
+let isConnected = false;
+
 // Check connection status
 async function checkConnection() {
     try {
@@ -335,12 +337,20 @@ async function checkConnection() {
 
         if (data.connected) {
             setConnectionStatus(true, data.document_count);
+            if (!isConnected) {
+                isConnected = true;
+                loadLibraries(); // Auto-load libraries once backend is ready
+            }
+            setTimeout(checkConnection, 30000); // Check again in 30s
         } else {
             setConnectionStatus(false);
+            isConnected = false;
+            setTimeout(checkConnection, 5000); // Retry in 5s
         }
     } catch (error) {
-        console.error('Connection check failed:', error);
         setConnectionStatus(false);
+        isConnected = false;
+        setTimeout(checkConnection, 5000); // Retry in 5s
     }
 }
 
