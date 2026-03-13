@@ -3,9 +3,29 @@ import os
 
 class MCPScorer:
     def evaluate(self, scenario, output):
-        search_output = output.get("search", {})
-        search_results = search_output.get("results", [])
-        meta = search_output.get("meta", {})
+        # Extract search results and meta from output
+        # output is a dict with 'search', 'documents', 'latencies'
+        search_data = output.get("search", {})
+        
+        # Handle cases where search_data might be a CallToolResult (if runner failed to extract JSON)
+        if hasattr(search_data, "content"):
+             # It's a CallToolResult
+             for part in search_data.content:
+                 if hasattr(part, "json"):
+                     search_data = part.json
+                     break
+                 if hasattr(part, "text"):
+                     try:
+                         search_data = json.loads(part.text)
+                         break
+                     except:
+                         continue
+        
+        if not isinstance(search_data, dict):
+            search_data = {}
+
+        search_results = search_data.get("results", [])
+        meta = search_data.get("meta", {})
         latencies = output.get("latencies", {})
         
         # 1. Completeness Score (Files + Concepts)
@@ -15,7 +35,19 @@ class MCPScorer:
         
         # Aggregate all content for concept search
         all_content = " ".join([res.get("content", "") for res in search_results]).lower()
-        all_content += " ".join([doc.get("content", "") for doc in output.get("documents", [])]).lower()
+        
+        # Add content from full documents fetched
+        docs = output.get("documents", [])
+        for doc in docs:
+            # doc might be a CallToolResult too
+            content = ""
+            if hasattr(doc, "content"):
+                for part in doc.content:
+                    if hasattr(part, "text"): content += part.text
+                    if hasattr(part, "json"): content += str(part.json)
+            elif isinstance(doc, dict):
+                content = doc.get("content", "")
+            all_content += " " + content.lower()
         
         concept_matches = [c for c in scenario.get("must_have_concepts", []) if c.lower() in all_content]
         concept_score = len(concept_matches) / len(scenario["must_have_concepts"]) if scenario.get("must_have_concepts") else 1.0
@@ -24,13 +56,16 @@ class MCPScorer:
         completeness = (file_score + concept_score) / 2
         
         # 2. Context Score (Verify 'context_added' metadata)
-        context_ok = all("context_added" in res for res in search_results) if search_results else True
+        context_ok = True
+        if search_results:
+            context_ok = all("context_added" in res for res in search_results)
         
         # 3. Metadata Score (Resolution method accuracy)
         actual_res = meta.get("resolution_method", "")
         expected_res = scenario.get("expected_resolution", "")
-        # Fuzzy match for resolution method
-        metadata_ok = actual_res == expected_res or expected_res in actual_res or actual_res in expected_res
+        metadata_ok = True
+        if expected_res:
+            metadata_ok = actual_res == expected_res or expected_res in actual_res or actual_res in expected_res
         
         # 4. Latency Check (< 2000ms)
         latency_ok = all(lat < 2000 for lat in latencies.values())
@@ -48,8 +83,7 @@ class MCPScorer:
         }
         return report
 
-    def save_report(self, reports, filename="tests/mcp/results/report.json"):
+    def save_report(self, reports, filename="tests/mcp_suite/results/report.json"):
         os.makedirs(os.path.dirname(filename), exist_ok=True)
-        # Ensure path is relative to repo root if needed, but here we use the one from the runner
         with open(filename, "w") as f:
             json.dump(reports, f, indent=2)
