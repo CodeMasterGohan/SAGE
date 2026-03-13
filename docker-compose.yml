@@ -3,10 +3,10 @@ x-shared-env: &shared-env
   QDRANT_PORT: 6333
   COLLECTION_NAME: sage_docs
   # Embedding settings
-  EMBEDDING_MODE: remote
+  EMBEDDING_MODE: local
   DENSE_MODEL_NAME: sentence-transformers/all-MiniLM-L6-v2
   DENSE_VECTOR_SIZE: 384
-  USE_NOMIC_PREFIX: false
+  USE_NOMIC_PREFIX: "false"
   # Remote vLLM embeddings (optional - set EMBEDDING_MODE=remote to use)
   VLLM_EMBEDDING_URL: ${VLLM_EMBEDDING_URL:-}
   VLLM_MODEL_NAME: ${VLLM_MODEL_NAME:-nomic-ai/nomic-embed-text-v1.5}
