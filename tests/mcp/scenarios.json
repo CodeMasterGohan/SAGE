@@ -1,0 +1,57 @@
+{
+  "scenarios": [
+    {
+      "id": "arch-react-reconciliation",
+      "description": "Research React 18 reconciliation process",
+      "query": "How does the reconciliation process work in React 18?",
+      "target_library": "react",
+      "expected_resolution": "explicit_arg",
+      "must_have_concepts": ["Virtual DOM", "Diffing algorithm", "Fiber"],
+      "must_have_files": ["react/18/reconciliation.md"]
+    },
+    {
+      "id": "arch-vue-vs-react",
+      "description": "Compare React hooks and Vue composition API",
+      "query": "Compare React hooks and Vue composition API",
+      "target_library": "GLOBAL",
+      "expected_resolution": "explicit_global",
+      "must_have_concepts": ["useState", "setup", "reactive"],
+      "must_have_files": ["react/latest/hooks.md", "vue/latest/composition-api.md"]
+    },
+    {
+      "id": "ambiguity-react-vue",
+      "description": "Test ambiguity handler for React and Vue",
+      "query": "Should I use React or Vue for a new dashboard?",
+      "target_library": null,
+      "expected_resolution": "ambiguity_multi_search",
+      "must_have_concepts": ["react", "vue"],
+      "must_have_files": []
+    },
+    {
+      "id": "arch-fastapi-auth",
+      "description": "Research FastAPI authentication patterns",
+      "query": "Explain OAuth2 with Password and Bearer in FastAPI",
+      "target_library": "fastapi",
+      "expected_resolution": "explicit_arg",
+      "must_have_concepts": ["OAuth2PasswordBearer", "Security", "Depends"],
+      "must_have_files": ["fastapi/latest/tutorial/security.md"]
+    },
+    {
+      "id": "arch-qdrant-indexing",
+      "description": "Research Qdrant vector indexing",
+      "query": "How does HNSW indexing work in Qdrant?",
+      "target_library": "qdrant",
+      "expected_resolution": "explicit_arg",
+      "must_have_concepts": ["HNSW", "Vector", "Distance"],
+      "must_have_files": ["qdrant/latest/concepts/indexing.md"]
+    },
+    {
+      "id": "neg-nonexistent-lib",
+      "description": "Search for a non-existent library",
+      "query": "How to use Svelte in SAGE?",
+      "target_library": "svelte",
+      "expected_resolution": "fallback_to_global",
+      "expect_fallback": true
+    }
+  ]
+}
