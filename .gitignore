@@ -34,3 +34,6 @@ Thumbs.db
 .coverage
 htmlcov/
 .worktrees/
+
+# Model Cache
+.cache/
