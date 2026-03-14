@@ -333,6 +333,12 @@ def ensure_collection(client: QdrantClient) -> None:
             field_schema=models.PayloadSchemaType.KEYWORD
         )
     
+    client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="chunk_index",
+        field_schema=models.PayloadSchemaType.INTEGER
+    )
+    
     logger.info(f"Collection {COLLECTION_NAME} created")
 
 

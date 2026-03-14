@@ -51,9 +51,14 @@ COLLECTION_NAME = os.getenv("COLLECTION_NAME", "sage_docs")
 EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "local")
 DENSE_MODEL_NAME = os.getenv("DENSE_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 USE_NOMIC_PREFIX = os.getenv("USE_NOMIC_PREFIX", "false").lower() == "true"
-VLLM_EMBEDDING_URL = os.getenv("VLLM_EMBEDDING_URL", "http://localhost:8000")
+VLLM_EMBEDDING_URL = os.getenv("VLLM_EMBEDDING_URL", "")
 VLLM_MODEL_NAME = os.getenv("VLLM_MODEL_NAME", "nomic-ai/nomic-embed-text-v1.5")
 VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")
+
+# Fallback to local if remote is requested but URL is missing
+if EMBEDDING_MODE == "remote" and not VLLM_EMBEDDING_URL:
+    logger.warning("EMBEDDING_MODE is 'remote' but VLLM_EMBEDDING_URL is not set. Falling back to 'local' mode.")
+    EMBEDDING_MODE = "local"
 
 # Initialize FastMCP server
 mcp = FastMCP(

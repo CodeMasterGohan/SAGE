@@ -2,6 +2,9 @@ x-shared-env: &shared-env
   QDRANT_HOST: qdrant
   QDRANT_PORT: 6333
   COLLECTION_NAME: sage_docs
+  # Model Caching
+  HF_HOME: /app/.cache/huggingface
+  FASTEMBED_CACHE_PATH: /app/.cache/fastembed
   # Embedding settings
   EMBEDDING_MODE: local
   DENSE_MODEL_NAME: sentence-transformers/all-MiniLM-L6-v2
@@ -36,6 +39,7 @@ services:
     volumes:
       - ./uploads:/app/uploads
       - ./dashboard/static:/app/static
+      - ./.cache:/app/.cache
     environment:
       <<: *shared-env
       UPLOAD_DIR: /app/uploads
@@ -50,6 +54,7 @@ services:
       - qdrant
     volumes:
       - ./uploads:/app/uploads
+      - ./.cache:/app/.cache
     environment:
       <<: *shared-env
       UPLOAD_DIR: /app/uploads
@@ -62,8 +67,11 @@ services:
       - qdrant
     volumes:
       - ./uploads:/app/uploads
+      - ./.cache:/home/appuser/.cache
     environment:
       <<: *shared-env
+      HF_HOME: /home/appuser/.cache/huggingface
+      FASTEMBED_CACHE_PATH: /home/appuser/.cache/fastembed
       MAX_BATCH_TOKENS: 2000
       VAULT_CONCURRENCY: ${VAULT_CONCURRENCY:-}
     extra_hosts:
@@ -78,6 +86,8 @@ services:
     ports:
       - "8000:8000"
       - "8090:8080"
+    volumes:
+      - ./.cache:/app/.cache
     environment:
       <<: *shared-env
     extra_hosts:
