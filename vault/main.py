@@ -436,9 +436,9 @@ async def process_document_async(
                 chunk_index = item["index"]
                 
                 # Create unique ID
-                point_id = hashlib.md5(
+                point_id = hashlib.sha256(
                     f"{library}:{version}:{filename}:{chunk_index}:{chunk_text[:100]}".encode()
-                ).hexdigest()
+                ).hexdigest()[:32]
                 
                 dense_list = dense_vec if isinstance(dense_vec, list) else dense_vec.tolist()
                 

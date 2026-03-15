@@ -87,8 +87,8 @@ def get_sparse_model() -> SparseTextEmbedding:
 
 
 def get_content_hash(content: str) -> str:
-    """Generate MD5 hash of content for deduplication."""
-    return hashlib.md5(content.encode()).hexdigest()
+    """Generate SHA-256 hash of content for deduplication."""
+    return hashlib.sha256(content.encode()).hexdigest()[:32]
 
 
 def detect_file_type(filename: str, content: bytes) -> str:

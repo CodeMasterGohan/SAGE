@@ -171,7 +171,7 @@ CACHE_TTL = 300  # 5 minutes
 async def _do_search_cached(query: str, library: str, version: str, limit: int, rerank: bool, fusion: str,
                             mode: str = "auto", semantic_weight: float = None, keyword_weight: float = None) -> List[Dict]:
     """Cached wrapper around the search module."""
-    cache_key = hashlib.md5(f"{query}:{library}:{version}:{limit}:{rerank}:{fusion}:{mode}:{semantic_weight}:{keyword_weight}".encode()).hexdigest()
+    cache_key = hashlib.sha256(f"{query}:{library}:{version}:{limit}:{rerank}:{fusion}:{mode}:{semantic_weight}:{keyword_weight}".encode()).hexdigest()
     now = time.time()
     
     if cache_key in _search_cache:
