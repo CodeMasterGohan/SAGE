@@ -1,0 +1,40 @@
+name: Playwright Tests
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+jobs:
+  test:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Docker Compose
+      run: docker compose up -d --build
+
+    - uses: actions/setup-node@v4
+      with:
+        node-version: lts/*
+
+    - name: Install dependencies
+      run: cd dashboard && npm ci || npm install
+
+    - name: Install Playwright Browsers
+      run: cd dashboard && npx playwright install --with-deps
+
+    - name: Wait for services to be ready
+      run: |
+        timeout 600 bash -c 'until curl -s http://localhost:8080/api/status | grep -q "\"connected\":true"; do echo "Waiting for backend..."; sleep 2; done' || (docker compose logs dashboard && exit 1)
+
+    - name: Run Playwright tests
+      run: cd dashboard && npx playwright test
+
+    - name: Upload Playwright report
+      uses: actions/upload-artifact@v4
+      if: ${{ !cancelled() }}
+      with:
+        name: playwright-report
+        path: dashboard/playwright-report/
+        retention-days: 30
