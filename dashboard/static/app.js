@@ -76,6 +76,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    // Hide suggestions when clicking outside
+    document.addEventListener('click', (e) => {
+        if (!searchInput.contains(e.target) && !searchSuggestions.contains(e.target)) {
+            hideSuggestions();
+        }
+    });
+
     // Library filter
     libraryFilter.addEventListener('input', filterLibraries);
 

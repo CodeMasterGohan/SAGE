@@ -51,6 +51,13 @@ test.describe('Search Functionality', () => {
     await expect(dashboardPage.fusionMethod).toHaveValue('rrf');
   });
 
+  test('should clear search input and reset state', async ({ dashboardPage }) => {
+    await dashboardPage.searchInput.fill('test query');
+    await expect(dashboardPage.searchInput).toHaveValue('test query');
+    await dashboardPage.searchInput.clear();
+    await expect(dashboardPage.searchInput).toHaveValue('');
+  });
+
   test('should show empty state for no results', async ({ dashboardPage, page }) => {
     // Mock the search API to return empty results
     await page.route('**/api/search', async route => {
@@ -106,5 +113,32 @@ test.describe('Search Functionality', () => {
     // Verify library was selected
     await expect(dashboardPage.activeFilterBadge).toBeVisible();
     await expect(dashboardPage.activeFilterName).toHaveText('react');
+  });
+
+  test('should hide suggestions when clicking outside', async ({ dashboardPage, page }) => {
+    const suggestions = [
+      { library: 'react', doc_count: 100 }
+    ];
+
+    // Mock suggestions API
+    await page.route('**/api/resolve*', async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(suggestions)
+      });
+    });
+
+    // Type query
+    await dashboardPage.searchInput.fill('re');
+
+    // Verify suggestions are visible
+    await expect(dashboardPage.searchSuggestions).toBeVisible();
+
+    // Click outside
+    await page.locator('body').click({ position: { x: 0, y: 0 } });
+
+    // Verify search suggestions are hidden
+    await expect(dashboardPage.searchSuggestions).not.toBeVisible();
   });
 });
