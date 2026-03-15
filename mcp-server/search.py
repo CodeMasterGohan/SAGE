@@ -125,6 +125,11 @@ def execute_hybrid_query(
     use_semantic = semantic_weight > 0.0 and dense_vector is not None
     use_keyword = keyword_weight > 0.0 and sparse_embedding is not None
 
+    if not use_semantic and not use_keyword:
+        logger.warning(f"Agentic search: no active legs (semantic={semantic_weight}, keyword={keyword_weight})")
+        # Return empty result set compatible with Qdrant QueryResponse
+        return models.QueryResponse(points=[])
+
     # --- Single-vector fast paths (no fusion needed) ---
     if use_semantic and not use_keyword:
         logger.info(f"Agentic search: semantic-only (weight={semantic_weight})")
