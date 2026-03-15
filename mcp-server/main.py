@@ -168,9 +168,10 @@ async def get_remote_embedding(text: str) -> list[float]:
 _search_cache = {}
 CACHE_TTL = 300  # 5 minutes
 
-async def _do_search_cached(query: str, library: str, version: str, limit: int, rerank: bool, fusion: str) -> List[Dict]:
+async def _do_search_cached(query: str, library: str, version: str, limit: int, rerank: bool, fusion: str,
+                            mode: str = "auto", semantic_weight: float = None, keyword_weight: float = None) -> List[Dict]:
     """Cached wrapper around the search module."""
-    cache_key = hashlib.md5(f"{query}:{library}:{version}:{limit}:{rerank}:{fusion}".encode()).hexdigest()
+    cache_key = hashlib.md5(f"{query}:{library}:{version}:{limit}:{rerank}:{fusion}:{mode}:{semantic_weight}:{keyword_weight}".encode()).hexdigest()
     now = time.time()
     
     if cache_key in _search_cache:
@@ -179,7 +180,7 @@ async def _do_search_cached(query: str, library: str, version: str, limit: int, 
             logger.info("Search cache hit")
             return [dict(r) for r in cached_results]
             
-    results = await _do_search(query, library, version, limit, rerank, fusion)
+    results = await _do_search(query, library, version, limit, rerank, fusion, mode, semantic_weight, keyword_weight)
     _search_cache[cache_key] = (results, now)
     
     if len(_search_cache) > 1000:
@@ -191,7 +192,8 @@ async def _do_search_cached(query: str, library: str, version: str, limit: int, 
             
     return [dict(r) for r in results]
 
-async def _do_search(query: str, library: str, version: str, limit: int, rerank: bool, fusion: str) -> List[Dict]:
+async def _do_search(query: str, library: str, version: str, limit: int, rerank: bool, fusion: str,
+                     mode: str = "auto", semantic_weight: float = None, keyword_weight: float = None) -> List[Dict]:
     """Wrapper that injects dependencies into the search module."""
     return await perform_search_workflow(
         query=query,
@@ -200,6 +202,9 @@ async def _do_search(query: str, library: str, version: str, limit: int, rerank:
         limit=limit,
         rerank=rerank,
         fusion_str=fusion,
+        mode=mode,
+        semantic_weight=semantic_weight,
+        keyword_weight=keyword_weight,
         # Inject dependencies
         get_client_fn=get_qdrant_client,
         get_dense_fn=get_dense_model,
@@ -223,15 +228,19 @@ async def search_docs(
     limit: int = 5,
     rerank: bool = False,
     fusion: str = "dbsf",
+    mode: str = "auto",
+    semantic_weight: float = None,
+    keyword_weight: float = None,
     context_chunks: int = 0
 ) -> Dict[str, Any]:
     """
-    Agent-Optimized Documentation Search.
+    Agent-Optimized Documentation Search with Agentic Hybrid Retrieval.
     
     Features:
     - Smart Context: Remembers previous library context.
     - Ambiguity Handling: Automatically detects multiple libraries (e.g. "React vs Vue").
     - Recursive Search: If targeted search fails, falls back to global search.
+    - Agentic Hybrid: Dynamically control semantic vs keyword retrieval balance.
     
     Args:
         query: Search query (e.g. "how to use useState")
@@ -240,6 +249,13 @@ async def search_docs(
         limit: Max results.
         rerank: Enable ColBERT reranking (slower, more accurate).
         fusion: "dbsf" (default) or "rrf".
+        mode: Retrieval strategy preset:
+            - "auto" (default): Full hybrid semantic + keyword search.
+            - "semantic": Dense vector only. Best for conceptual/natural language queries.
+            - "keyword": Sparse/BM25 only. Best for exact terms, error codes, identifiers.
+            - "hybrid": Same as auto (explicit alias).
+        semantic_weight: Fine-grained dense retrieval weight (0.0-1.0). Overrides mode preset.
+        keyword_weight: Fine-grained sparse retrieval weight (0.0-1.0). Overrides mode preset.
         context_chunks: Include surrounding content chunks by fetching specific indexes.
     
     Returns:
@@ -304,11 +320,20 @@ async def search_docs(
                 target_libraries = [None] # Global fallback
                 meta["resolution_method"] = "default_global"
     
+    meta["search_mode"] = mode
+    if semantic_weight is not None:
+        meta["semantic_weight"] = semantic_weight
+    if keyword_weight is not None:
+        meta["keyword_weight"] = keyword_weight
     meta["active_context"] = target_libraries
     
     # 2. Execute Search
     tasks = [
-        _do_search_cached(query=query, library=lib_target, version=version, limit=limit, rerank=rerank, fusion=fusion)
+        _do_search_cached(
+            query=query, library=lib_target, version=version, limit=limit,
+            rerank=rerank, fusion=fusion, mode=mode,
+            semantic_weight=semantic_weight, keyword_weight=keyword_weight
+        )
         for lib_target in target_libraries
     ]
     
@@ -326,7 +351,9 @@ async def search_docs(
     if not final_results and all(l is not None for l in target_libraries):
         logger.info("Targeted search failed. Attempting global fallback.")
         fallback_results = await _do_search_cached(
-            query=query, library=None, version=None, limit=limit, rerank=rerank, fusion=fusion
+            query=query, library=None, version=None, limit=limit,
+            rerank=rerank, fusion=fusion, mode=mode,
+            semantic_weight=semantic_weight, keyword_weight=keyword_weight
         )
         if fallback_results:
             for res in fallback_results:

@@ -76,6 +76,9 @@ class SearchRequest(BaseModel):
     version: Optional[str] = None
     limit: int = 5
     fusion: str = "dbsf"
+    mode: str = "auto"  # auto|semantic|keyword|hybrid
+    semantic_weight: Optional[float] = None  # 0.0-1.0, overrides mode
+    keyword_weight: Optional[float] = None   # 0.0-1.0, overrides mode
 
 
 class ResolveRequest(BaseModel):
@@ -430,14 +433,6 @@ async def list_libraries(
         if not library_facets.hits:
             return []
         
-        # Query 2: Get ALL versions in a single call (no filter)
-        # This avoids N separate queries for each library
-        version_facets = client.facet(
-            collection_name=COLLECTION_NAME,
-            key="version",
-            limit=1000
-        )
-        
         # Build library-version mapping using scroll with minimal payload
         # We need to know which versions belong to which libraries
         # Scroll a sample of points to build the mapping efficiently
@@ -496,14 +491,32 @@ async def search_docs(
     bm25_model: SparseTextEmbedding = Depends(get_bm25_model),
     dense_model: TextEmbedding = Depends(get_dense_model)
 ) -> list[SearchResult]:
-    """Search documentation using hybrid semantic + keyword search."""
+    """Search documentation using hybrid semantic + keyword search with agentic weight control."""
+    
+    # Resolve agentic weights from mode + explicit overrides
+    MODE_PRESETS = {
+        "auto":     (1.0, 1.0),
+        "hybrid":   (1.0, 1.0),
+        "semantic": (1.0, 0.0),
+        "keyword":  (0.0, 1.0),
+    }
+    preset = MODE_PRESETS.get(request.mode.lower(), (1.0, 1.0))
+    sw = request.semantic_weight if request.semantic_weight is not None else preset[0]
+    kw = request.keyword_weight if request.keyword_weight is not None else preset[1]
+    sw = max(0.0, min(1.0, sw))
+    kw = max(0.0, min(1.0, kw))
     
     # Apply Nomic prefix if needed
     query_for_embed = f"search_query: {request.query}" if USE_NOMIC_PREFIX else request.query
     
-    # Generate embeddings
-    dense_vector = list(dense_model.embed([query_for_embed]))[0].tolist()
-    sparse_embedding = list(bm25_model.embed([request.query]))[0]
+    # Generate embeddings only for active legs
+    dense_vector = None
+    if sw > 0.0:
+        dense_vector = list(dense_model.embed([query_for_embed]))[0].tolist()
+    
+    sparse_embedding = None
+    if kw > 0.0:
+        sparse_embedding = list(bm25_model.embed([request.query]))[0]
     
     # Build filter conditions
     filter_conditions = []
@@ -530,28 +543,60 @@ async def search_docs(
     fusion_type = models.Fusion.DBSF if request.fusion.lower() == "dbsf" else models.Fusion.RRF
     
     try:
-        results = client.query_points(
-            collection_name=COLLECTION_NAME,
-            prefetch=[
-                models.Prefetch(
-                    query=dense_vector,
-                    using="dense",
-                    limit=request.limit * 2
+        use_semantic = sw > 0.0 and dense_vector is not None
+        use_keyword = kw > 0.0 and sparse_embedding is not None
+        
+        # Single-vector fast paths (no fusion needed)
+        if use_semantic and not use_keyword:
+            results = client.query_points(
+                collection_name=COLLECTION_NAME,
+                query=dense_vector,
+                using="dense",
+                query_filter=search_filter,
+                limit=request.limit,
+                with_payload=True,
+            )
+        elif use_keyword and not use_semantic:
+            results = client.query_points(
+                collection_name=COLLECTION_NAME,
+                query=models.SparseVector(
+                    indices=sparse_embedding.indices.tolist(),
+                    values=sparse_embedding.values.tolist(),
                 ),
-                models.Prefetch(
-                    query=models.SparseVector(
-                        indices=sparse_embedding.indices.tolist(),
-                        values=sparse_embedding.values.tolist()
+                using="sparse",
+                query_filter=search_filter,
+                limit=request.limit,
+                with_payload=True,
+            )
+        else:
+            # Hybrid path with weight-proportional prefetch
+            total_weight = sw + kw
+            sem_ratio = sw / total_weight if total_weight > 0 else 0.5
+            kw_ratio = kw / total_weight if total_weight > 0 else 0.5
+            base_prefetch = request.limit * 2
+            
+            results = client.query_points(
+                collection_name=COLLECTION_NAME,
+                prefetch=[
+                    models.Prefetch(
+                        query=dense_vector,
+                        using="dense",
+                        limit=max(1, int(base_prefetch * sem_ratio * 2)),
                     ),
-                    using="sparse",
-                    limit=request.limit * 2
-                )
-            ],
-            query=models.FusionQuery(fusion=fusion_type),
-            query_filter=search_filter,
-            limit=request.limit,
-            with_payload=True
-        )
+                    models.Prefetch(
+                        query=models.SparseVector(
+                            indices=sparse_embedding.indices.tolist(),
+                            values=sparse_embedding.values.tolist(),
+                        ),
+                        using="sparse",
+                        limit=max(1, int(base_prefetch * kw_ratio * 2)),
+                    )
+                ],
+                query=models.FusionQuery(fusion=fusion_type),
+                query_filter=search_filter,
+                limit=request.limit,
+                with_payload=True,
+            )
         
         formatted = []
         for point in results.points:

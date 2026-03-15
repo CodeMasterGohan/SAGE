@@ -132,6 +132,9 @@ Search documentation using hybrid semantic + keyword search.
 | `limit` | int | ❌ | Max results (default: 5) |
 | `rerank` | bool | ❌ | Enable ColBERT reranking |
 | `fusion` | string | ❌ | "dbsf" or "rrf" |
+| `mode` | string | ❌ | Retrieval preset: "auto" (default), "semantic", "keyword", "hybrid" |
+| `semantic_weight` | float | ❌ | Dense retrieval weight 0.0-1.0 (overrides mode) |
+| `keyword_weight` | float | ❌ | Sparse retrieval weight 0.0-1.0 (overrides mode) |
 
 **Example prompt:**
 > "Search SAGE-Docs for authentication patterns"

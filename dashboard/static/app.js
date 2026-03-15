@@ -10,6 +10,7 @@ let currentLibrary = null;
 let libraries = [];
 let searchTimeout = null;
 let currentTab = 'search';
+let stagedDocuments = [];
 
 // DOM Elements
 const searchInput = document.getElementById('searchInput');
@@ -44,8 +45,6 @@ const uploadLibrary = document.getElementById('uploadLibrary');
 const uploadVersion = document.getElementById('uploadVersion');
 const uploadProgress = document.getElementById('uploadProgress');
 const uploadFileName = document.getElementById('uploadFileName');
-const uploadPercent = document.getElementById('uploadPercent');
-const uploadProgressBar = document.getElementById('uploadProgressBar');
 const uploadResult = document.getElementById('uploadResult');
 const uploadResultTitle = document.getElementById('uploadResultTitle');
 const uploadResultMessage = document.getElementById('uploadResultMessage');
@@ -108,6 +107,95 @@ function switchTab(tab) {
     }
 }
 
+// Input Tab switching
+function switchInputTab(tab) {
+    const btnTabFile = document.getElementById('btnTabFile');
+    const btnTabText = document.getElementById('btnTabText');
+    const dropZone = document.getElementById('dropZone');
+    const textZone = document.getElementById('textZone');
+
+    if (tab === 'file') {
+        btnTabFile.className = 'text-sm font-medium text-cyan-400 border-b-2 border-cyan-400 pb-1';
+        btnTabText.className = 'text-sm font-medium text-gray-500 hover:text-gray-300 pb-1';
+        dropZone.classList.remove('hidden');
+        textZone.classList.add('hidden');
+    } else {
+        btnTabText.className = 'text-sm font-medium text-cyan-400 border-b-2 border-cyan-400 pb-1';
+        btnTabFile.className = 'text-sm font-medium text-gray-500 hover:text-gray-300 pb-1';
+        textZone.classList.remove('hidden');
+        dropZone.classList.add('hidden');
+    }
+}
+
+function showUploadError(message) {
+    const errorContainer = document.getElementById('uploadError');
+    const errorMessage = document.getElementById('uploadErrorMessage');
+    errorMessage.textContent = message;
+    errorContainer.classList.remove('hidden');
+}
+
+function hideUploadError() {
+    const errorContainer = document.getElementById('uploadError');
+    errorContainer.classList.add('hidden');
+}
+
+function addTextDocument() {
+    const nameInput = document.getElementById('textDocumentName');
+    const contentInput = document.getElementById('textContent');
+    let name = nameInput.value.trim();
+    const content = contentInput.value.trim();
+
+    if (!content) {
+        showUploadError('Please enter some text content.');
+        return;
+    }
+
+    if (!name) {
+        name = `document-${stagedDocuments.length + 1}.txt`;
+    } else if (!name.includes('.')) {
+        name += '.txt';
+    }
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const file = new File([blob], name, { type: 'text/plain' });
+
+    stagedDocuments.push(file);
+
+    nameInput.value = '';
+    contentInput.value = '';
+    hideUploadError();
+    renderStagedDocuments();
+}
+
+function renderStagedDocuments() {
+    const section = document.getElementById('stagedDocsSection');
+    const list = document.getElementById('stagedDocsList');
+
+    if (stagedDocuments.length === 0) {
+        section.classList.add('hidden');
+        return;
+    }
+
+    section.classList.remove('hidden');
+    list.innerHTML = stagedDocuments.map((file, index) => `
+        <li class="flex items-center justify-between p-3 bg-[#0d1117] border border-gray-800 rounded-lg">
+            <div class="flex items-center gap-3">
+                <i class="fa-solid ${file.name.endsWith('.pdf') ? 'fa-file-pdf' : 'fa-file-lines'} text-cyan-400"></i>
+                <span class="text-sm text-gray-300">${file.name}</span>
+                <span class="text-xs text-gray-500">(${(file.size / 1024).toFixed(1)} KB)</span>
+            </div>
+            <button onclick="removeStagedDocument(${index})" class="text-gray-500 hover:text-red-400">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+        </li>
+    `).join('');
+}
+
+function removeStagedDocument(index) {
+    stagedDocuments.splice(index, 1);
+    renderStagedDocuments();
+}
+
 // Upload handlers
 function setupUploadHandlers() {
     // Drag and drop
@@ -137,14 +225,34 @@ function setupUploadHandlers() {
     });
 }
 
-async function handleFileUpload(files) {
+function handleFileUpload(files) {
+    for (const file of files) {
+        stagedDocuments.push(file);
+    }
+    hideUploadError();
+    renderStagedDocuments();
+    fileInput.value = '';
+}
+
+async function submitUploads() {
     const library = uploadLibrary.value.trim();
     const version = uploadVersion.value.trim() || 'latest';
 
     if (!library) {
-        alert('Please enter a library name');
+        showUploadError('Please enter a library name.');
         return;
     }
+
+    if (stagedDocuments.length === 0) {
+        showUploadError('Please add at least one document to upload.');
+        return;
+    }
+
+    hideUploadError();
+
+    const filesToUpload = [...stagedDocuments];
+    stagedDocuments = [];
+    renderStagedDocuments();
 
     // Get status elements
     const uploadStatus = document.getElementById('uploadStatus');
@@ -153,12 +261,12 @@ async function handleFileUpload(files) {
     uploadProgress.classList.remove('hidden');
     uploadResult.classList.add('hidden');
 
-    let totalFiles = files.length;
     let processed = 0;
     let totalChunks = 0;
     let hasErrors = false;
+    let lastError = null;
 
-    for (const file of files) {
+    for (const file of filesToUpload) {
         const isAsyncUpload = file.name.toLowerCase().endsWith('.pdf') || file.name.toLowerCase().match(/\.(png|jpe?g)$/);
 
         // Update status
@@ -207,12 +315,14 @@ async function handleFileUpload(files) {
                             console.error('Upload failed:', statusData.error);
                             uploadStatus.textContent = `Error: ${statusData.error}`;
                             hasErrors = true;
+                            lastError = statusData.error;
                         }
                     }
                 } else {
                     console.error('Async upload failed:', asyncResult);
                     uploadStatus.textContent = 'Upload failed. Check console.';
                     hasErrors = true;
+                    lastError = asyncResult.detail || 'Upload failed';
                 }
             } else {
                 // Use regular sync endpoint for non-PDFs
@@ -232,12 +342,14 @@ async function handleFileUpload(files) {
                     console.error('Upload failed:', result);
                     uploadStatus.textContent = `Error: ${result.detail || 'Upload failed'}`;
                     hasErrors = true;
+                    lastError = result.detail || 'Upload failed';
                 }
             }
         } catch (error) {
             console.error('Upload error:', error);
             uploadStatus.textContent = `Error: ${error.message}`;
             hasErrors = true;
+            lastError = error.message;
         }
 
         processed++;
@@ -250,8 +362,8 @@ async function handleFileUpload(files) {
     if (hasErrors || totalChunks === 0) {
         uploadResultTitle.textContent = totalChunks > 0 ? 'Upload completed with issues' : 'Upload failed';
         uploadResultMessage.textContent = totalChunks > 0
-            ? `Indexed ${totalChunks} chunks but some files had errors. Check console.`
-            : 'No content was indexed. Check console for errors.';
+            ? `Indexed ${totalChunks} chunks but some files had errors: ${lastError}`
+            : `Failed: ${lastError || 'Check console for errors.'}`;
         // Change to error styling
         uploadResult.querySelector('div').className = 'p-4 rounded-lg bg-red-900/20 border border-red-800';
         uploadResult.querySelector('i').className = 'fa-solid fa-exclamation-circle text-red-400 text-xl';
@@ -268,11 +380,8 @@ async function handleFileUpload(files) {
     }
 
     // Refresh libraries
-    loadLibraries();
+    await loadLibraries();
     renderLibraryManager();
-
-    // Clear file input
-    fileInput.value = '';
 }
 
 function renderLibraryManager() {
@@ -316,7 +425,7 @@ async function deleteLibrary(library) {
         });
 
         if (response.ok) {
-            loadLibraries();
+            await loadLibraries();
             renderLibraryManager();
         } else {
             alert('Failed to delete library');

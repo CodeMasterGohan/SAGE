@@ -807,30 +807,23 @@ async def ensure_collection(client: QdrantClient):
                 )
             )
         )
-        
-        # Create payload indexes for filtering
-        client.create_payload_index(
-            collection_name=COLLECTION_NAME,
-            field_name="library",
-            field_schema=models.PayloadSchemaType.KEYWORD
-        )
-        client.create_payload_index(
-            collection_name=COLLECTION_NAME,
-            field_name="version",
-            field_schema=models.PayloadSchemaType.KEYWORD
-        )
-        client.create_payload_index(
-            collection_name=COLLECTION_NAME,
-            field_name="file_path",
-            field_schema=models.PayloadSchemaType.KEYWORD
-        )
-        client.create_payload_index(
-            collection_name=COLLECTION_NAME,
-            field_name="chunk_index",
-            field_schema=models.PayloadSchemaType.INTEGER
-        )
-        
         logger.info(f"Collection {COLLECTION_NAME} created successfully")
+
+    # Always ensure payload indexes exist (idempotent — safe on existing collections)
+    for field_name, field_schema in [
+        ("library",     models.PayloadSchemaType.KEYWORD),
+        ("version",     models.PayloadSchemaType.KEYWORD),
+        ("file_path",   models.PayloadSchemaType.KEYWORD),
+        ("chunk_index", models.PayloadSchemaType.INTEGER),
+    ]:
+        try:
+            client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name=field_name,
+                field_schema=field_schema
+            )
+        except Exception:
+            pass  # Index already exists — that's fine
 
 
 async def delete_library(client: QdrantClient, library: str, version: str = None) -> int:
