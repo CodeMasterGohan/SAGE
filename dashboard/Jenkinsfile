@@ -1,0 +1,42 @@
+pipeline {
+    agent {
+        docker {
+            image 'mcr.microsoft.com/playwright:v1.45.0-jammy'
+        }
+    }
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        stage('Install') {
+            steps {
+                sh 'npm ci'
+            }
+        }
+        stage('Browsers') {
+            steps {
+                sh 'npx playwright install --with-deps'
+            }
+        }
+        stage('Test') {
+            steps {
+                sh 'npx playwright test'
+            }
+        }
+    }
+    post {
+        always {
+            publishHTML(target: [
+                allowMissing: false,
+                alwaysLinkToLastBuild: true,
+                keepAll: true,
+                reportDir: 'playwright-report',
+                reportFiles: 'index.html',
+                reportName: 'Playwright Report'
+            ])
+            archiveArtifacts artifacts: 'playwright-report/**', allowEmptyArchive: true
+        }
+    }
+}
