@@ -11,6 +11,7 @@ import re
 import hashlib
 import logging
 import zipfile
+import asyncio
 from pathlib import Path
 from typing import Optional
 import yaml
@@ -576,7 +577,7 @@ async def _ingest_markdown(
     sparse_model = get_sparse_model()
     
     # Save original file
-    file_path = save_uploaded_file(markdown.encode(), filename, library, version)
+    file_path = await save_uploaded_file(markdown.encode(), filename, library, version)
     
     # Generate embeddings
     points = []
@@ -630,11 +631,11 @@ async def _ingest_markdown(
     return len(points)
 
 
-def save_uploaded_file(content: bytes, filename: str, library: str, version: str) -> Path:
+async def save_uploaded_file(content: bytes, filename: str, library: str, version: str) -> Path:
     """Save uploaded file to disk."""
     # Create directory structure
     save_dir = UPLOAD_DIR / library / version
-    save_dir.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(save_dir.mkdir, parents=True, exist_ok=True)
     
     # Sanitize filename
     safe_name = re.sub(r'[^\w\-_\.]', '_', filename)
@@ -643,8 +644,11 @@ def save_uploaded_file(content: bytes, filename: str, library: str, version: str
     
     file_path = save_dir / safe_name
     
-    with open(file_path, 'wb') as f:
-        f.write(content)
+    def _write_file():
+        with open(file_path, 'wb') as f:
+            f.write(content)
+
+    await asyncio.to_thread(_write_file)
     
     return file_path
 
