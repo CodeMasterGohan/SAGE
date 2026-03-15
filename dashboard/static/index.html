@@ -78,7 +78,7 @@
                 <i class="fa-solid fa-filter absolute left-3 top-2.5 text-gray-500 text-xs"></i>
                 <input id="libraryFilter"
                     class="w-full bg-[#1C212B] border border-gray-800 rounded-md py-1.5 pl-8 pr-3 text-sm focus:outline-none focus:border-sage-accent focus:ring-1 focus:ring-sage-accent transition-colors text-gray-300 placeholder-gray-600/50"
-                    placeholder="Filter libraries..." type="text" />
+                    placeholder="Filter libraries..." type="text" aria-label="Filter libraries" />
             </div>
         </div>
 
@@ -183,10 +183,11 @@
                         <i class="fa-solid fa-magnifying-glass text-cyan-400 text-lg ml-2 mr-4"></i>
                         <input id="searchInput" autofocus
                             class="bg-transparent border-none w-full text-lg text-white focus:ring-0 placeholder-gray-600 caret-cyan-400"
-                            type="text" placeholder="Search documentation..." />
+                            type="text" placeholder="Search documentation..." aria-label="Search documentation" />
                         <div class="flex items-center gap-2">
                             <select id="fusionMethod"
-                                class="text-[10px] font-medium text-gray-400 bg-gray-800 px-2 py-0.5 rounded hover:bg-gray-700 border border-gray-600 transition-colors cursor-pointer">
+                                class="text-[10px] font-medium text-gray-400 bg-gray-800 px-2 py-0.5 rounded hover:bg-gray-700 border border-gray-600 transition-colors cursor-pointer"
+                                aria-label="Search fusion method">
                                 <option value="dbsf">DBSF</option>
                                 <option value="rrf">RRF</option>
                             </select>
@@ -211,7 +212,7 @@
                             <span id="activeFilterBadge"
                                 class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-cyan-950 text-cyan-400 border border-cyan-800 rounded text-xs">
                                 <span id="activeFilterName">react</span>
-                                <button onclick="clearLibraryFilter()" class="hover:text-cyan-200">
+                                <button onclick="clearLibraryFilter()" class="hover:text-cyan-200" aria-label="Clear active filter">
                                     <i class="fa-solid fa-xmark"></i>
                                 </button>
                             </span>
@@ -274,12 +275,14 @@
                     <div>
                         <label class="block text-xs font-medium text-gray-400 mb-2">Library Name *</label>
                         <input id="uploadLibrary" type="text" placeholder="e.g., react, python-requests"
-                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" />
+                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                            aria-label="Library Name" />
                     </div>
                     <div>
                         <label class="block text-xs font-medium text-gray-400 mb-2">Version</label>
                         <input id="uploadVersion" type="text" placeholder="e.g., 18.2, latest" value="latest"
-                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" />
+                            class="w-full bg-[#0d1117] border border-gray-700 rounded-lg px-4 py-2 text-white placeholder-gray-600 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                            aria-label="Version" />
                     </div>
                 </div>
 
@@ -294,7 +297,7 @@
                     onclick="document.getElementById('fileInput').click()">
                     <input id="fileInput" type="file" multiple
                         accept=".md,.markdown,.html,.htm,.txt,.pdf,.zip,.docx,.xlsx,.xls,.png,.jpg,.jpeg"
-                        class="hidden" />
+                        class="hidden" aria-label="File Input" />
                     <div
                         class="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-cyan-900/30 to-blue-900/30 flex items-center justify-center">
                         <i class="fa-solid fa-cloud-arrow-up text-4xl text-cyan-400"></i>
@@ -325,8 +328,8 @@
 
                 <!-- Text Input Zone -->
                 <div id="textZone" class="hidden rounded-xl bg-[#0d1117] border border-gray-800 p-4">
-                    <input id="textDocumentName" type="text" placeholder="Document Name (e.g., notes.txt)" class="w-full bg-[#161b22] border border-gray-700 rounded-lg px-4 py-2 text-white mb-4 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" />
-                    <textarea id="textContent" placeholder="Paste your text here..." rows="6" class="w-full bg-[#161b22] border border-gray-700 rounded-lg px-4 py-2 text-white mb-4 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"></textarea>
+                    <input id="textDocumentName" type="text" placeholder="Document Name (e.g., notes.txt)" class="w-full bg-[#161b22] border border-gray-700 rounded-lg px-4 py-2 text-white mb-4 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" aria-label="Document Name" />
+                    <textarea id="textContent" placeholder="Paste your text here..." rows="6" class="w-full bg-[#161b22] border border-gray-700 rounded-lg px-4 py-2 text-white mb-4 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" aria-label="Document Content"></textarea>
                     <button onclick="addTextDocument()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition-colors">
                         <i class="fa-solid fa-plus mr-1"></i> Add Document
                     </button>

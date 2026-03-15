@@ -191,7 +191,7 @@ function renderStagedDocuments() {
                 <span class="text-sm text-gray-300">${file.name}</span>
                 <span class="text-xs text-gray-500">(${(file.size / 1024).toFixed(1)} KB)</span>
             </div>
-            <button onclick="removeStagedDocument(${index})" class="text-gray-500 hover:text-red-400">
+            <button onclick="removeStagedDocument(${index})" class="text-gray-500 hover:text-red-400" aria-label="Remove staged document">
                 <i class="fa-solid fa-xmark"></i>
             </button>
         </li>
@@ -414,6 +414,7 @@ function renderLibraryManager() {
                 onclick="deleteLibrary('${lib.library}')"
                 class="delete-btn p-2 rounded-lg text-gray-500 hover:text-red-400"
                 title="Delete library"
+                aria-label="Delete library"
             >
                 <i class="fa-solid fa-trash"></i>
             </button>
@@ -733,7 +734,7 @@ async function viewDocument(filePath) {
             <h2 class="text-lg font-semibold text-white">${escapeHtml(doc.title)}</h2>
             <p class="text-xs text-gray-500">${doc.library} v${doc.version} • ${doc.chunk_count} chunks</p>
           </div>
-          <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-white">
+          <button onclick="this.closest('.fixed').remove()" class="text-gray-400 hover:text-white" aria-label="Close document">
             <i class="fa-solid fa-xmark text-xl"></i>
           </button>
         </div>
