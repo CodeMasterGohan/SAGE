@@ -522,16 +522,26 @@ function renderLibraries(libs) {
     }
 
     libraryList.innerHTML = libs.map(lib => `
-    <li>
+    <li class="group">
       <a 
         class="library-item flex items-center justify-between px-4 py-2 text-sm text-sage-textMuted hover:text-white rounded-md cursor-pointer ${currentLibrary === lib.library ? 'active' : ''}"
         onclick="selectLibrary('${lib.library}')"
       >
         <div class="flex items-center gap-3">
           <i class="fa-solid fa-book w-4 text-center"></i>
-          <span class="library-name">${lib.library}</span>
+          <span class="library-name truncate max-w-[140px]">${lib.library}</span>
         </div>
-        <span class="text-xs text-gray-600">${lib.versions.length > 0 ? lib.versions[0] : ''}</span>
+        <div class="flex items-center gap-2">
+          <span class="text-xs text-gray-600">${lib.versions.length > 0 ? lib.versions[0] : ''}</span>
+          <button 
+            onclick="event.stopPropagation(); deleteLibrary('${lib.library}')"
+            class="sidebar-delete-btn opacity-0 group-hover:opacity-100 p-1 rounded text-gray-500 hover:text-red-400 transition-all"
+            title="Delete library"
+            aria-label="Delete library"
+          >
+            <i class="fa-solid fa-trash-can text-[10px]"></i>
+          </button>
+        </div>
       </a>
     </li>
   `).join('');
@@ -825,3 +835,32 @@ function highlightCode(code) {
         .replace(/(\/\/.*$)/gm, '<span class="token-comment">$1</span>')
         .replace(/(#.*$)/gm, '<span class="token-comment">$1</span>');
 }
+
+// Update Search Fusion Tooltip
+function updateFusionTooltip() {
+    const method = fusionMethod.value;
+    const tooltip = document.getElementById('fusionTooltip');
+    const container = document.querySelector('.tooltip-container');
+
+    if (method === 'dbsf') {
+        tooltip.innerHTML = `
+            <span class="tooltip-title">DBSF (Default)</span>
+            Distribution-Based Score Fusion. Native Qdrant method that normalizes similarity scores before combining them. Best for well-calibrated models.
+        `;
+    } else {
+        tooltip.innerHTML = `
+            <span class="tooltip-title">RRF</span>
+            Reciprocal Rank Fusion. Combines results based on their rank rather than raw scores. Highly robust and excellent for general-purpose hybrid search.
+        `;
+    }
+    
+    // Position the tooltip relative to the container
+    if (container) {
+        const containerRect = container.getBoundingClientRect();
+        tooltip.style.left = containerRect.left + containerRect.width / 2 + 'px';
+        tooltip.style.bottom = window.innerHeight - containerRect.top + 10 + 'px';
+    }
+}
+
+// Update tooltip position on window resize
+window.addEventListener('resize', updateFusionTooltip);

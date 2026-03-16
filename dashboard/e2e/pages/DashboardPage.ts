@@ -129,4 +129,8 @@ export class DashboardPage extends BasePage {
   getDeleteLibraryButton(name: string): Locator {
     return this.libraryManager.locator(`div:has-text("${name}") button.delete-btn`);
   }
+
+  getSidebarDeleteButton(name: string): Locator {
+    return this.page.locator(`#libraryList li:has-text("${name}") button.sidebar-delete-btn`);
+  }
 }

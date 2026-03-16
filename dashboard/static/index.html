@@ -40,6 +40,7 @@
         }
     </script>
     <link rel="stylesheet" href="/static/styles.css" />
+    <link rel="icon" type="image/png" href="/static/favicon.png" />
 </head>
 
 <body
@@ -50,8 +51,8 @@
         <!-- Sidebar Header -->
         <div class="h-16 flex items-center px-6 gap-3 border-b border-transparent">
             <div
-                class="w-8 h-8 rounded bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-[0_0_15px_rgba(0,240,255,0.5)]">
-                <i class="fa-solid fa-scroll text-white text-sm"></i>
+                class="w-8 h-8 rounded bg-gradient-to-br from-cyan-400 to-blue-600 flex items-center justify-center shadow-[0_0_15px_rgba(0,240,255,0.5)] overflow-hidden">
+                <img src="/static/logo-wizard.png" alt="SAGE Wizard" class="w-full h-full object-cover" />
             </div>
             <span class="font-bold tracking-tight text-lg">SAGE-Docs</span>
         </div>
@@ -167,9 +168,11 @@
         <div id="searchView" class="max-w-6xl mx-auto px-8 pb-20">
             <!-- Hero Title -->
             <div class="text-center mb-8">
-                <h1 class="text-5xl font-bold tracking-tight mb-2">
-                    Search <span
-                        class="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500">SAGE-Docs</span>
+                <h1 class="text-5xl font-bold tracking-tight mb-2 flex items-center justify-center gap-4">
+                    <img src="/static/logo-wizard.png" alt="Wizard Logo"
+                        class="w-16 h-16 object-contain drop-shadow-[0_0_15px_rgba(0,240,255,0.4)]" />
+                    <span>Search <span
+                            class="bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-blue-500">SAGE-Docs</span></span>
                 </h1>
                 <p class="text-gray-500 text-sm">Smart Accessible Gateway for Enterprise Documentation</p>
             </div>
@@ -185,12 +188,19 @@
                             class="bg-transparent border-none w-full text-lg text-white focus:ring-0 placeholder-gray-600 caret-cyan-400"
                             type="text" placeholder="Search documentation..." aria-label="Search documentation" />
                         <div class="flex items-center gap-2">
-                            <select id="fusionMethod"
-                                class="text-[10px] font-medium text-gray-400 bg-gray-800 px-2 py-0.5 rounded hover:bg-gray-700 border border-gray-600 transition-colors cursor-pointer"
-                                aria-label="Search fusion method">
-                                <option value="dbsf">DBSF</option>
-                                <option value="rrf">RRF</option>
-                            </select>
+                            <div class="tooltip-container">
+                                <span class="tooltip-text" id="fusionTooltip">
+                                    <span class="tooltip-title">DBSF (Default)</span>
+                                    Distribution-Based Score Fusion. Native Qdrant method that normalizes similarity
+                                    scores before combining them.
+                                </span>
+                                <select id="fusionMethod"
+                                    class="text-[10px] font-medium text-gray-400 bg-gray-800 px-2 py-0.5 rounded hover:bg-gray-700 border border-gray-600 transition-colors cursor-pointer"
+                                    aria-label="Search fusion method" onchange="updateFusionTooltip()">
+                                    <option value="dbsf">DBSF</option>
+                                    <option value="rrf">RRF</option>
+                                </select>
+                            </div>
                             <kbd
                                 class="text-[10px] font-mono text-gray-500 bg-gray-900 border border-gray-700 px-1.5 py-0.5 rounded shadow-sm">↵</kbd>
                         </div>
@@ -212,7 +222,8 @@
                             <span id="activeFilterBadge"
                                 class="inline-flex items-center gap-1.5 px-2 py-0.5 bg-cyan-950 text-cyan-400 border border-cyan-800 rounded text-xs">
                                 <span id="activeFilterName">react</span>
-                                <button onclick="clearLibraryFilter()" class="hover:text-cyan-200" aria-label="Clear active filter">
+                                <button onclick="clearLibraryFilter()" class="hover:text-cyan-200"
+                                    aria-label="Clear active filter">
                                     <i class="fa-solid fa-xmark"></i>
                                 </button>
                             </span>
@@ -288,16 +299,18 @@
 
                 <!-- Input Type Tabs -->
                 <div class="flex gap-4 mb-4 border-b border-gray-800 pb-2">
-                    <button id="btnTabFile" class="text-sm font-medium text-cyan-400 border-b-2 border-cyan-400 pb-1" onclick="switchInputTab('file')">File Upload</button>
-                    <button id="btnTabText" class="text-sm font-medium text-gray-500 hover:text-gray-300 pb-1" onclick="switchInputTab('text')">Direct Text Input</button>
+                    <button id="btnTabFile" class="text-sm font-medium text-cyan-400 border-b-2 border-cyan-400 pb-1"
+                        onclick="switchInputTab('file')">File Upload</button>
+                    <button id="btnTabText" class="text-sm font-medium text-gray-500 hover:text-gray-300 pb-1"
+                        onclick="switchInputTab('text')">Direct Text Input</button>
                 </div>
 
                 <!-- Drop Zone -->
                 <div id="dropZone" class="upload-zone rounded-xl p-12 text-center cursor-pointer"
                     onclick="document.getElementById('fileInput').click()">
                     <input id="fileInput" type="file" multiple
-                        accept=".md,.markdown,.html,.htm,.txt,.pdf,.zip,.docx,.xlsx,.xls,.png,.jpg,.jpeg"
-                        class="hidden" aria-label="File Input" />
+                        accept=".md,.markdown,.html,.htm,.txt,.pdf,.zip,.docx,.xlsx,.xls,.png,.jpg,.jpeg" class="hidden"
+                        aria-label="File Input" />
                     <div
                         class="w-20 h-20 mx-auto mb-4 rounded-full bg-gradient-to-br from-cyan-900/30 to-blue-900/30 flex items-center justify-center">
                         <i class="fa-solid fa-cloud-arrow-up text-4xl text-cyan-400"></i>
@@ -328,9 +341,14 @@
 
                 <!-- Text Input Zone -->
                 <div id="textZone" class="hidden rounded-xl bg-[#0d1117] border border-gray-800 p-4">
-                    <input id="textDocumentName" type="text" placeholder="Document Name (e.g., notes.txt)" class="w-full bg-[#161b22] border border-gray-700 rounded-lg px-4 py-2 text-white mb-4 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" aria-label="Document Name" />
-                    <textarea id="textContent" placeholder="Paste your text here..." rows="6" class="w-full bg-[#161b22] border border-gray-700 rounded-lg px-4 py-2 text-white mb-4 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500" aria-label="Document Content"></textarea>
-                    <button onclick="addTextDocument()" class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition-colors">
+                    <input id="textDocumentName" type="text" placeholder="Document Name (e.g., notes.txt)"
+                        class="w-full bg-[#161b22] border border-gray-700 rounded-lg px-4 py-2 text-white mb-4 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                        aria-label="Document Name" />
+                    <textarea id="textContent" placeholder="Paste your text here..." rows="6"
+                        class="w-full bg-[#161b22] border border-gray-700 rounded-lg px-4 py-2 text-white mb-4 focus:border-cyan-500 focus:ring-1 focus:ring-cyan-500"
+                        aria-label="Document Content"></textarea>
+                    <button onclick="addTextDocument()"
+                        class="px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg text-sm transition-colors">
                         <i class="fa-solid fa-plus mr-1"></i> Add Document
                     </button>
                 </div>
@@ -353,7 +371,8 @@
                 </div>
 
                 <!-- Submit Button -->
-                <button id="btnSubmitUpload" onclick="submitUploads()" class="w-full mt-6 py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2">
+                <button id="btnSubmitUpload" onclick="submitUploads()"
+                    class="w-full mt-6 py-3 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg transition-colors flex items-center justify-center gap-2">
                     <i class="fa-solid fa-upload"></i> Upload Documents
                 </button>
 
