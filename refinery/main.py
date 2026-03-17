@@ -8,6 +8,7 @@ searchable chunks indexed in Qdrant vector database.
 import os
 import io
 import re
+import asyncio
 import hashlib
 import logging
 import zipfile
@@ -23,6 +24,7 @@ from markdownify import markdownify as md
 from bs4 import BeautifulSoup
 import subprocess
 import shutil
+
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from fastembed import TextEmbedding, SparseTextEmbedding
@@ -606,7 +608,7 @@ async def _ingest_markdown(
         return 0
     
     # Save original file
-    file_path = save_uploaded_file(markdown.encode(), filename, library, version)
+    file_path = await asyncio.to_thread(save_uploaded_file, markdown.encode(), filename, library, version)
     
     # Prepare texts for embedding
     embed_texts = [
@@ -620,7 +622,7 @@ async def _ingest_markdown(
         dense_embeddings = [vec for vec in dense_embeddings_raw]
     else:
         dense_model = get_dense_model()
-        dense_embeddings = [list(dense_model.embed([t]))[0].tolist() for t in embed_texts]
+        dense_embeddings = (await asyncio.to_thread(lambda: [list(dense_model.embed([t]))[0].tolist() for t in embed_texts]))
     
     # Get sparse model (always local — tiny vocabulary model, no HF download)
     sparse_model = get_sparse_model()
@@ -630,7 +632,7 @@ async def _ingest_markdown(
     
     for i, (chunk, dense_vec) in enumerate(zip(chunks, dense_embeddings)):
         # Generate sparse embedding
-        sparse_result = list(sparse_model.embed([chunk]))[0]
+        sparse_result = (await asyncio.to_thread(lambda: list(sparse_model.embed([chunk]))))[0]
         sparse_embedding = models.SparseVector(
             indices=sparse_result.indices.tolist(),
             values=sparse_result.values.tolist()
@@ -663,7 +665,8 @@ async def _ingest_markdown(
     
     # Upsert to Qdrant
     if points:
-        client.upsert(
+        await asyncio.to_thread(
+            client.upsert,
             collection_name=COLLECTION_NAME,
             points=points
         )
@@ -693,12 +696,13 @@ def save_uploaded_file(content: bytes, filename: str, library: str, version: str
 
 async def ensure_collection(client: QdrantClient):
     """Ensure the collection exists with proper configuration."""
-    collections = client.get_collections().collections
+    collections = (await asyncio.to_thread(client.get_collections)).collections
     exists = any(c.name == COLLECTION_NAME for c in collections)
     
     if not exists:
         logger.info(f"Creating collection: {COLLECTION_NAME}")
-        client.create_collection(
+        await asyncio.to_thread(
+            client.create_collection,
             collection_name=COLLECTION_NAME,
             vectors_config={
                 "dense": models.VectorParams(
@@ -723,22 +727,26 @@ async def ensure_collection(client: QdrantClient):
         )
         
         # Create payload indexes for filtering
-        client.create_payload_index(
+        await asyncio.to_thread(
+            client.create_payload_index,
             collection_name=COLLECTION_NAME,
             field_name="library",
             field_schema=models.PayloadSchemaType.KEYWORD
         )
-        client.create_payload_index(
+        await asyncio.to_thread(
+            client.create_payload_index,
             collection_name=COLLECTION_NAME,
             field_name="version",
             field_schema=models.PayloadSchemaType.KEYWORD
         )
-        client.create_payload_index(
+        await asyncio.to_thread(
+            client.create_payload_index,
             collection_name=COLLECTION_NAME,
             field_name="file_path",
             field_schema=models.PayloadSchemaType.KEYWORD
         )
-        client.create_payload_index(
+        await asyncio.to_thread(
+            client.create_payload_index,
             collection_name=COLLECTION_NAME,
             field_name="chunk_index",
             field_schema=models.PayloadSchemaType.INTEGER
@@ -765,13 +773,15 @@ async def delete_library(client: QdrantClient, library: str, version: str = None
         )
     
     # Count before delete
-    count_result = client.count(
+    count_result = await asyncio.to_thread(
+        client.count,
         collection_name=COLLECTION_NAME,
         count_filter=models.Filter(must=filter_conditions)
     )
     
     # Delete from Qdrant
-    client.delete(
+    await asyncio.to_thread(
+        client.delete,
         collection_name=COLLECTION_NAME,
         points_selector=models.FilterSelector(
             filter=models.Filter(must=filter_conditions)
@@ -786,7 +796,8 @@ async def delete_library(client: QdrantClient, library: str, version: str = None
     
     if delete_path.exists():
         import shutil
-        shutil.rmtree(delete_path)
+
+        await asyncio.to_thread(shutil.rmtree, delete_path)
     
     logger.info(f"Deleted {count_result.count} chunks for library {library}" + (f" v{version}" if version else ""))
     
