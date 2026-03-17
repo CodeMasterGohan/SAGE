@@ -9,6 +9,7 @@ export const test = base.extend<MyFixtures>({
   dashboardPage: async ({ page }, use) => {
     const dashboardPage = new DashboardPage(page);
     await dashboardPage.navigate();
+    await dashboardPage.page.waitForLoadState('networkidle');
     await use(dashboardPage);
   },
 });

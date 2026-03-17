@@ -212,9 +212,6 @@ def extract_pdf_text(pdf_content: bytes) -> str:
             f"--pdfs={pdf_path}",
         ]
         if olmocr_server:
-            # Strip trailing /v1 if present — olmocr expects the base server URL
-            # e.g. http://gpu-server:8000/v1  →  http://gpu-server:8000/v1
-            # (olmocr appends /chat/completions internally)
             cmd += ["--server", olmocr_server, "--model", olmocr_model]
             if olmocr_api_key:
                 cmd += ["--api_key", olmocr_api_key]
