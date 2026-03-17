@@ -167,11 +167,19 @@ def yield_safe_batches(chunks_data: list[dict], max_tokens: int = MAX_BATCH_TOKE
 
 
 def get_dense_model() -> TextEmbedding:
-    """Get or create dense embedding model."""
+    """Get or create dense embedding model (local mode only)."""
+    if EMBEDDING_MODE == "remote":
+        raise RuntimeError(
+            "get_dense_model() called in remote embedding mode. "
+            "Ingestion is handled by the Vault service using the remote vLLM endpoint."
+        )
     global _dense_model
     if _dense_model is None:
         logger.info(f"Loading dense model: {DENSE_MODEL_NAME}")
-        _dense_model = TextEmbedding(model_name=DENSE_MODEL_NAME)
+        _dense_model = TextEmbedding(
+            model_name=DENSE_MODEL_NAME,
+            cache_dir=os.getenv("FASTEMBED_CACHE_PATH", None)
+        )
     return _dense_model
 
 
@@ -678,6 +686,13 @@ async def _ingest_markdown(
     
     # Fallback: Use local processing if Vault not available
     logger.info(f"Vault not available, using local processing for {filename}")
+    
+    if EMBEDDING_MODE == "remote":
+        logger.error(
+            "Cannot ingest document: Vault service is unavailable and EMBEDDING_MODE=remote. "
+            "Ensure the Vault service is running when using remote embeddings."
+        )
+        return 0
     
     # Split into chunks
     chunks = split_text_semantic(markdown)

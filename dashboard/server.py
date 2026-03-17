@@ -36,6 +36,16 @@ EMBEDDING_MODE = os.getenv("EMBEDDING_MODE", "local")
 DENSE_MODEL_NAME = os.getenv("DENSE_MODEL_NAME", "sentence-transformers/all-MiniLM-L6-v2")
 USE_NOMIC_PREFIX = os.getenv("USE_NOMIC_PREFIX", "false").lower() == "true"
 
+# Remote vLLM configuration (used when EMBEDDING_MODE=remote)
+VLLM_EMBEDDING_URL = os.getenv("VLLM_EMBEDDING_URL", "")
+VLLM_MODEL_NAME = os.getenv("VLLM_MODEL_NAME", "nomic-ai/nomic-embed-text-v1.5")
+VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")
+
+if EMBEDDING_MODE == "remote":
+    logger.info("Embedding mode: REMOTE (vLLM). Local dense model will NOT be loaded or downloaded.")
+else:
+    logger.info("Embedding mode: LOCAL (fastembed). Local dense model will be loaded on first use.")
+
 # Global checks for startup/shutdown only - not for direct use
 _qdrant_client: Optional[QdrantClient] = None
 _dense_model: Optional[TextEmbedding] = None
@@ -52,12 +62,36 @@ async def get_qdrant_client() -> QdrantClient:
 
 
 async def get_dense_model() -> TextEmbedding:
-    """Dependency for getting dense embedding model."""
+    """Dependency for getting dense embedding model (local mode only)."""
+    if EMBEDDING_MODE == "remote":
+        raise RuntimeError(
+            "get_dense_model() called in remote embedding mode. "
+            "Use get_remote_query_embedding() instead."
+        )
     global _dense_model
     if _dense_model is None:
         logger.info(f"Loading embedding model ({DENSE_MODEL_NAME})...")
-        _dense_model = TextEmbedding(model_name=DENSE_MODEL_NAME)
+        _dense_model = TextEmbedding(
+            model_name=DENSE_MODEL_NAME,
+            cache_dir=os.getenv("FASTEMBED_CACHE_PATH", None)
+        )
     return _dense_model
+
+
+async def get_remote_query_embedding(text: str) -> list[float]:
+    """Get a query embedding from the remote vLLM endpoint."""
+    import httpx
+    headers = {"Content-Type": "application/json"}
+    if VLLM_API_KEY:
+        headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        response = await client.post(
+            f"{VLLM_EMBEDDING_URL}/v1/embeddings",
+            json={"input": [text], "model": VLLM_MODEL_NAME},
+            headers=headers
+        )
+        response.raise_for_status()
+        return response.json()["data"][0]["embedding"]
 
 
 async def get_bm25_model() -> SparseTextEmbedding:
@@ -163,7 +197,8 @@ async def lifespan(app: FastAPI):
     """Lifespan handler for startup/shutdown."""
     # Startup: preload models and ensure collection
     logger.info("Preloading models...")
-    await get_dense_model()
+    if EMBEDDING_MODE == "local":
+        await get_dense_model()
     await get_bm25_model()
     client = await get_qdrant_client()
     await ensure_collection(client)
@@ -489,7 +524,6 @@ async def search_docs(
     request: SearchRequest,
     client: QdrantClient = Depends(get_qdrant_client),
     bm25_model: SparseTextEmbedding = Depends(get_bm25_model),
-    dense_model: TextEmbedding = Depends(get_dense_model)
 ) -> list[SearchResult]:
     """Search documentation using hybrid semantic + keyword search with agentic weight control."""
     
@@ -509,10 +543,14 @@ async def search_docs(
     # Apply Nomic prefix if needed
     query_for_embed = f"search_query: {request.query}" if USE_NOMIC_PREFIX else request.query
     
-    # Generate embeddings only for active legs
+    # Generate dense embedding only for active semantic leg
     dense_vector = None
     if sw > 0.0:
-        dense_vector = list(dense_model.embed([query_for_embed]))[0].tolist()
+        if EMBEDDING_MODE == "remote":
+            dense_vector = await get_remote_query_embedding(query_for_embed)
+        else:
+            local_dense = await get_dense_model()
+            dense_vector = list(local_dense.embed([query_for_embed]))[0].tolist()
     
     sparse_embedding = None
     if kw > 0.0:

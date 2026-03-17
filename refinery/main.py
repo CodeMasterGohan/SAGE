@@ -63,18 +63,55 @@ DENSE_MODEL_NAME = os.getenv("DENSE_MODEL_NAME", "sentence-transformers/all-Mini
 DENSE_VECTOR_SIZE = int(os.getenv("DENSE_VECTOR_SIZE", "384"))
 USE_NOMIC_PREFIX = os.getenv("USE_NOMIC_PREFIX", "false").lower() == "true"
 
+# Remote vLLM configuration (used when EMBEDDING_MODE=remote)
+VLLM_EMBEDDING_URL = os.getenv("VLLM_EMBEDDING_URL", "http://localhost:8000")
+VLLM_MODEL_NAME = os.getenv("VLLM_MODEL_NAME", "nomic-ai/nomic-embed-text-v1.5")
+VLLM_API_KEY = os.getenv("VLLM_API_KEY", "")
+
+if EMBEDDING_MODE == "remote":
+    logger.info("Embedding mode: REMOTE (vLLM). Local dense model will NOT be loaded or downloaded.")
+else:
+    logger.info("Embedding mode: LOCAL (fastembed). Local dense model will be loaded on first use.")
+
 # Global model instances
 _dense_model: Optional[TextEmbedding] = None
 _sparse_model: Optional[SparseTextEmbedding] = None
 
 
 def get_dense_model() -> TextEmbedding:
-    """Get or create dense embedding model."""
+    """Get or create dense embedding model (local mode only)."""
+    if EMBEDDING_MODE == "remote":
+        raise RuntimeError(
+            "get_dense_model() called in remote embedding mode. "
+            "Use remote vLLM embeddings instead."
+        )
     global _dense_model
     if _dense_model is None:
         logger.info(f"Loading dense model: {DENSE_MODEL_NAME}")
-        _dense_model = TextEmbedding(model_name=DENSE_MODEL_NAME)
+        _dense_model = TextEmbedding(
+            model_name=DENSE_MODEL_NAME,
+            cache_dir=os.getenv("FASTEMBED_CACHE_PATH", None)
+        )
     return _dense_model
+
+
+async def get_remote_embeddings(texts: list[str]) -> list[list[float]]:
+    """Get dense embeddings from the remote vLLM endpoint."""
+    import httpx
+    if not texts:
+        return []
+    headers = {"Content-Type": "application/json"}
+    if VLLM_API_KEY:
+        headers["Authorization"] = f"Bearer {VLLM_API_KEY}"
+    async with httpx.AsyncClient(timeout=120.0) as client:
+        response = await client.post(
+            f"{VLLM_EMBEDDING_URL}/v1/embeddings",
+            json={"input": texts, "model": VLLM_MODEL_NAME},
+            headers=headers
+        )
+        response.raise_for_status()
+        data = response.json()
+        return [item["embedding"] for item in sorted(data["data"], key=lambda x: x["index"])]
 
 
 def get_sparse_model() -> SparseTextEmbedding:
@@ -571,25 +608,30 @@ async def _ingest_markdown(
     if not chunks:
         return 0
     
-    # Get models
-    dense_model = get_dense_model()
-    sparse_model = get_sparse_model()
-    
     # Save original file
     file_path = save_uploaded_file(markdown.encode(), filename, library, version)
     
-    # Generate embeddings
+    # Prepare texts for embedding
+    embed_texts = [
+        f"search_document: {c}" if USE_NOMIC_PREFIX else c
+        for c in chunks
+    ]
+    
+    # Generate dense embeddings (local or remote)
+    if EMBEDDING_MODE == "remote":
+        dense_embeddings_raw = await get_remote_embeddings(embed_texts)
+        dense_embeddings = [vec for vec in dense_embeddings_raw]
+    else:
+        dense_model = get_dense_model()
+        dense_embeddings = [list(dense_model.embed([t]))[0].tolist() for t in embed_texts]
+    
+    # Get sparse model (always local — tiny vocabulary model, no HF download)
+    sparse_model = get_sparse_model()
+    
+    # Generate embeddings and build points
     points = []
     
-    for i, chunk in enumerate(chunks):
-        # Prepare text for embedding
-        embed_text = chunk
-        if USE_NOMIC_PREFIX:
-            embed_text = f"search_document: {chunk}"
-        
-        # Generate dense embedding
-        dense_embedding = list(dense_model.embed([embed_text]))[0].tolist()
-        
+    for i, (chunk, dense_vec) in enumerate(zip(chunks, dense_embeddings)):
         # Generate sparse embedding
         sparse_result = list(sparse_model.embed([chunk]))[0]
         sparse_embedding = models.SparseVector(
@@ -597,13 +639,16 @@ async def _ingest_markdown(
             values=sparse_result.values.tolist()
         )
         
+        # Dense vector (already a list for remote; convert from numpy for local)
+        dense_list = dense_vec if isinstance(dense_vec, list) else dense_vec.tolist()
+        
         # Create unique ID
         chunk_id = get_content_hash(f"{library}:{version}:{filename}:{i}:{chunk[:100]}")
         
         point = models.PointStruct(
             id=chunk_id,
             vector={
-                "dense": dense_embedding,
+                "dense": dense_list,
                 "sparse": sparse_embedding
             },
             payload={
@@ -755,7 +800,8 @@ async def delete_library(client: QdrantClient, library: str, version: str = None
 async def lifespan(app: FastAPI):
     """Lifespan handler for startup/shutdown."""
     logger.info("Initializing Refinery models...")
-    get_dense_model()
+    if EMBEDDING_MODE == "local":
+        get_dense_model()
     get_sparse_model()
     client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
     await ensure_collection(client)

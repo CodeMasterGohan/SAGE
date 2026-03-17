@@ -60,6 +60,11 @@ if EMBEDDING_MODE == "remote" and not VLLM_EMBEDDING_URL:
     logger.warning("EMBEDDING_MODE is 'remote' but VLLM_EMBEDDING_URL is not set. Falling back to 'local' mode.")
     EMBEDDING_MODE = "local"
 
+if EMBEDDING_MODE == "remote":
+    logger.info("Embedding mode: REMOTE (vLLM). Local dense model will NOT be loaded or downloaded.")
+else:
+    logger.info("Embedding mode: LOCAL (fastembed). Local dense model will be loaded on first use.")
+
 # Initialize FastMCP server
 mcp = FastMCP(
     "SAGE-Docs",
@@ -90,11 +95,19 @@ def get_qdrant_client() -> QdrantClient:
 
 
 def get_dense_model() -> TextEmbedding:
-    """Get or create dense embedding model."""
+    """Get or create dense embedding model (local mode only)."""
+    if EMBEDDING_MODE == "remote":
+        raise RuntimeError(
+            "get_dense_model() called in remote embedding mode. "
+            "Use get_remote_embedding() instead."
+        )
     global _dense_model
     if _dense_model is None:
         logger.info(f"Loading embedding model ({DENSE_MODEL_NAME})...")
-        _dense_model = TextEmbedding(model_name=DENSE_MODEL_NAME)
+        _dense_model = TextEmbedding(
+            model_name=DENSE_MODEL_NAME,
+            cache_dir=os.getenv("FASTEMBED_CACHE_PATH", None)
+        )
     return _dense_model
 
 
@@ -614,7 +627,8 @@ def main():
     
     if args.preload:
         logger.info("Preloading models...")
-        get_dense_model()
+        if EMBEDDING_MODE == "local":
+            get_dense_model()
         get_bm25_model()
     
     if args.transport == "http":

@@ -62,6 +62,11 @@ MAX_BATCH_TOKENS = int(os.getenv("MAX_BATCH_TOKENS", "2000"))
 _DEFAULT_CONCURRENCY = "100" if EMBEDDING_MODE == "remote" else "10"
 CONCURRENCY_LIMIT = int(os.getenv("VAULT_CONCURRENCY", _DEFAULT_CONCURRENCY))
 
+if EMBEDDING_MODE == "remote":
+    logger.info("Embedding mode: REMOTE (vLLM). Local dense model will NOT be loaded or downloaded.")
+else:
+    logger.info("Embedding mode: LOCAL (fastembed). Local dense model will be loaded on first use.")
+
 # Global model instances (lazy loaded)
 _tokenizer: Optional[Tokenizer] = None
 _dense_model: Optional[TextEmbedding] = None
@@ -74,6 +79,9 @@ _sparse_model: Optional[SparseTextEmbedding] = None
 def get_tokenizer() -> Optional[Tokenizer]:
     """Load BERT tokenizer for token counting (conservative proxy for most models)."""
     global _tokenizer
+    if EMBEDDING_MODE == "remote":
+        # No local model downloads in remote mode; use whitespace fallback
+        return None
     if _tokenizer is None and TOKENIZER_AVAILABLE:
         try:
             _tokenizer = Tokenizer.from_pretrained("bert-base-uncased")
@@ -114,11 +122,19 @@ def truncate_to_tokens(text: str, max_tokens: int) -> str:
 # EMBEDDING MODEL FUNCTIONS
 # ============================================================
 def get_dense_model() -> TextEmbedding:
-    """Get or create dense embedding model."""
+    """Get or create dense embedding model (local mode only)."""
+    if EMBEDDING_MODE == "remote":
+        raise RuntimeError(
+            "get_dense_model() called in remote embedding mode. "
+            "Use get_remote_embeddings_async() instead."
+        )
     global _dense_model
     if _dense_model is None:
         logger.info(f"Loading dense model: {DENSE_MODEL_NAME}")
-        _dense_model = TextEmbedding(model_name=DENSE_MODEL_NAME)
+        _dense_model = TextEmbedding(
+            model_name=DENSE_MODEL_NAME,
+            cache_dir=os.getenv("FASTEMBED_CACHE_PATH", None)
+        )
     return _dense_model
 
 
