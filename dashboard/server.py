@@ -9,6 +9,7 @@ import os
 import logging
 import uuid
 import threading
+import asyncio
 from typing import Optional, Annotated
 from contextlib import asynccontextmanager
 
@@ -459,7 +460,8 @@ async def list_libraries(
     
     try:
         # Query 1: Get all unique libraries
-        library_facets = client.facet(
+        library_facets = await asyncio.to_thread(
+            client.facet,
             collection_name=COLLECTION_NAME,
             key="library",
             limit=1000
@@ -474,7 +476,8 @@ async def list_libraries(
         library_versions: dict[str, set[str]] = {hit.value: set() for hit in library_facets.hits}
         
         # Use scroll to get library-version pairs with minimal data
-        results, next_offset = client.scroll(
+        results, next_offset = await asyncio.to_thread(
+            client.scroll,
             collection_name=COLLECTION_NAME,
             limit=2000,  # Reasonable batch
             with_payload=["library", "version"],
@@ -489,7 +492,8 @@ async def list_libraries(
         
         # While there are more results, continue scrolling
         while next_offset and len(results) == 2000:
-            results, next_offset = client.scroll(
+            results, next_offset = await asyncio.to_thread(
+                client.scroll,
                 collection_name=COLLECTION_NAME,
                 offset=next_offset,
                 limit=2000,
@@ -550,11 +554,11 @@ async def search_docs(
             dense_vector = await get_remote_query_embedding(query_for_embed)
         else:
             local_dense = await get_dense_model()
-            dense_vector = list(local_dense.embed([query_for_embed]))[0].tolist()
+            dense_vector = (await asyncio.to_thread(lambda: list(local_dense.embed([query_for_embed]))))[0].tolist()
     
     sparse_embedding = None
     if kw > 0.0:
-        sparse_embedding = list(bm25_model.embed([request.query]))[0]
+        sparse_embedding = (await asyncio.to_thread(lambda: list(bm25_model.embed([request.query]))))[0]
     
     # Build filter conditions
     filter_conditions = []
@@ -586,7 +590,8 @@ async def search_docs(
         
         # Single-vector fast paths (no fusion needed)
         if use_semantic and not use_keyword:
-            results = client.query_points(
+            results = await asyncio.to_thread(
+                client.query_points,
                 collection_name=COLLECTION_NAME,
                 query=dense_vector,
                 using="dense",
@@ -595,7 +600,8 @@ async def search_docs(
                 with_payload=True,
             )
         elif use_keyword and not use_semantic:
-            results = client.query_points(
+            results = await asyncio.to_thread(
+                client.query_points,
                 collection_name=COLLECTION_NAME,
                 query=models.SparseVector(
                     indices=sparse_embedding.indices.tolist(),
@@ -613,7 +619,8 @@ async def search_docs(
             kw_ratio = kw / total_weight if total_weight > 0 else 0.5
             base_prefetch = request.limit * 2
             
-            results = client.query_points(
+            results = await asyncio.to_thread(
+                client.query_points,
                 collection_name=COLLECTION_NAME,
                 prefetch=[
                     models.Prefetch(
@@ -669,7 +676,8 @@ async def resolve_library(
     
     try:
         # Get all libraries using facet API
-        library_facets = client.facet(
+        library_facets = await asyncio.to_thread(
+            client.facet,
             collection_name=COLLECTION_NAME,
             key="library",
             limit=1000
@@ -724,7 +732,8 @@ async def resolve_library(
             ]
         )
         
-        results, next_offset = client.scroll(
+        results, next_offset = await asyncio.to_thread(
+            client.scroll,
             collection_name=COLLECTION_NAME,
             scroll_filter=scroll_filter,
             limit=1000,
@@ -765,7 +774,8 @@ async def get_document(
     """Get the full content of a specific document by its file path."""
     
     try:
-        results, _ = client.scroll(
+        results, _ = await asyncio.to_thread(
+            client.scroll,
             collection_name=COLLECTION_NAME,
             scroll_filter=models.Filter(
                 must=[
