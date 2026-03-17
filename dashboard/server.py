@@ -57,7 +57,7 @@ async def get_qdrant_client() -> QdrantClient:
     global _qdrant_client
     if _qdrant_client is None:
         logger.info(f"Connecting to Qdrant at {QDRANT_HOST}:{QDRANT_PORT}")
-        _qdrant_client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+        _qdrant_client = QdrantClient(location=QDRANT_HOST, port=QDRANT_PORT)
     return _qdrant_client
 
 
@@ -338,7 +338,7 @@ def _process_upload_background(task_id: str, content: bytes, filename: str, libr
             # Ideally we pass a factory or handle this better, but for now we re-instantiate or use global if safe
             # Since get_qdrant_client is now async and uses global, we might need a sync wrapper or use sync client for thread
             # For simplicity in this refactor, we'll create a new client for the thread
-            client = QdrantClient(host=QDRANT_HOST, port=QDRANT_PORT)
+            client = QdrantClient(location=QDRANT_HOST, port=QDRANT_PORT)
             result = loop.run_until_complete(ingest_document(
                 client=client,
                 content=content,
