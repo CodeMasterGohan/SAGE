@@ -306,8 +306,9 @@
                 </div>
 
                 <!-- Drop Zone -->
-                <div id="dropZone" class="upload-zone rounded-xl p-12 text-center cursor-pointer"
-                    onclick="document.getElementById('fileInput').click()">
+                <div id="dropZone" class="upload-zone rounded-xl p-12 text-center cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500 focus:outline-none"
+                    onclick="document.getElementById('fileInput').click()"
+                    tabindex="0" role="button" aria-label="Upload files">
                     <input id="fileInput" type="file" multiple
                         accept=".md,.markdown,.html,.htm,.txt,.pdf,.zip,.docx,.xlsx,.xls,.png,.jpg,.jpeg" class="hidden"
                         aria-label="File Input" />
