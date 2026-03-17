@@ -1,0 +1,3 @@
+## 2024-05-14 - Interactive Elements Need Explicit A11y
+**Learning:** Adding `onclick` to a `div` element (like a file drop zone) is insufficient for accessibility; it remains invisible to keyboard users and screen readers unless explicitly marked up with `tabindex`, `role="button"`, `aria-label`, and `focus-visible` styles, along with a custom keyboard event listener (e.g., handling 'Enter' and 'Space').
+**Action:** Whenever creating a custom interactive component using non-interactive semantic HTML (like a `div`), always include `tabindex="0"`, an appropriate ARIA role, an `aria-label`, visible focus indicators, and custom keydown event handlers.

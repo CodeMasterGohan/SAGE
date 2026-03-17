@@ -224,6 +224,14 @@ function setupUploadHandlers() {
         }
     });
 
+    // Keyboard support for drop zone
+    dropZone.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            fileInput.click();
+        }
+    });
+
     // File input change
     fileInput.addEventListener('change', () => {
         if (fileInput.files.length > 0) {
