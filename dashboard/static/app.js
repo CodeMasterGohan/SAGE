@@ -49,6 +49,7 @@ const uploadResult = document.getElementById('uploadResult');
 const uploadResultTitle = document.getElementById('uploadResultTitle');
 const uploadResultMessage = document.getElementById('uploadResultMessage');
 const libraryManager = document.getElementById('libraryManager');
+const btnSubmitUpload = document.getElementById('btnSubmitUpload');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -272,6 +273,11 @@ async function submitUploads() {
     // Get status elements
     const uploadStatus = document.getElementById('uploadStatus');
 
+    // Disable submit button and show loading state
+    btnSubmitUpload.disabled = true;
+    btnSubmitUpload.classList.add('opacity-50', 'cursor-not-allowed');
+    btnSubmitUpload.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Uploading...';
+
     // Show progress
     uploadProgress.classList.remove('hidden');
     uploadResult.classList.add('hidden');
@@ -393,6 +399,11 @@ async function submitUploads() {
         uploadResultTitle.className = 'text-green-400 font-medium';
         uploadResultMessage.className = 'text-green-300/70 text-sm';
     }
+
+    // Restore submit button state
+    btnSubmitUpload.disabled = false;
+    btnSubmitUpload.classList.remove('opacity-50', 'cursor-not-allowed');
+    btnSubmitUpload.innerHTML = '<i class="fa-solid fa-upload"></i> Upload Documents';
 
     // Refresh libraries
     await loadLibraries();
