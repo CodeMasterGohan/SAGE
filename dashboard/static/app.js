@@ -534,6 +534,9 @@ function renderLibraries(libs) {
       <a 
         class="library-item flex items-center justify-between px-4 py-2 text-sm text-sage-textMuted hover:text-white rounded-md cursor-pointer ${currentLibrary === lib.library ? 'active' : ''}"
         onclick="selectLibrary('${lib.library}')"
+        tabindex="0"
+        role="button"
+        onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectLibrary('${lib.library}'); }"
       >
         <div class="flex items-center gap-3">
           <i class="fa-solid fa-book w-4 text-center"></i>
@@ -646,6 +649,9 @@ async function showSuggestions(query) {
         <li 
           class="suggestion-item flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer ${i === 0 ? 'bg-[#1f2937] border border-cyan-900/30' : ''}"
           onclick="selectLibrary('${s.library}'); performSearch();"
+          tabindex="0"
+          role="button"
+          onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectLibrary('${s.library}'); performSearch(); }"
         >
           <div class="flex items-center gap-3">
             <i class="fa-solid fa-arrow-right ${i === 0 ? 'text-sage-accent' : 'text-gray-600'}"></i>
