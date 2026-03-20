@@ -49,6 +49,9 @@ const uploadResult = document.getElementById('uploadResult');
 const uploadResultTitle = document.getElementById('uploadResultTitle');
 const uploadResultMessage = document.getElementById('uploadResultMessage');
 const libraryManager = document.getElementById('libraryManager');
+const btnSubmitUpload = document.getElementById('btnSubmitUpload');
+const btnSubmitUploadIcon = document.getElementById('btnSubmitUploadIcon');
+const btnSubmitUploadText = document.getElementById('btnSubmitUploadText');
 
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
@@ -269,6 +272,11 @@ async function submitUploads() {
     stagedDocuments = [];
     renderStagedDocuments();
 
+    // Update button state
+    btnSubmitUpload.disabled = true;
+    btnSubmitUploadIcon.className = 'fa-solid fa-spinner fa-spin';
+    btnSubmitUploadText.textContent = 'Uploading...';
+
     // Get status elements
     const uploadStatus = document.getElementById('uploadStatus');
 
@@ -369,6 +377,11 @@ async function submitUploads() {
 
         processed++;
     }
+
+    // Restore button state
+    btnSubmitUpload.disabled = false;
+    btnSubmitUploadIcon.className = 'fa-solid fa-upload';
+    btnSubmitUploadText.textContent = 'Upload Documents';
 
     // Show result
     uploadProgress.classList.add('hidden');
