@@ -532,8 +532,12 @@ function renderLibraries(libs) {
     libraryList.innerHTML = libs.map(lib => `
     <li class="group">
       <a 
-        class="library-item flex items-center justify-between px-4 py-2 text-sm text-sage-textMuted hover:text-white rounded-md cursor-pointer ${currentLibrary === lib.library ? 'active' : ''}"
+        role="button"
+        tabindex="0"
+        aria-label="Select ${lib.library} library"
+        class="library-item flex items-center justify-between px-4 py-2 text-sm text-sage-textMuted hover:text-white rounded-md cursor-pointer focus-visible:ring-2 focus-visible:ring-cyan-500 focus:outline-none ${currentLibrary === lib.library ? 'active' : ''}"
         onclick="selectLibrary('${lib.library}')"
+        onkeydown="if(event.key === 'Enter' || event.key === ' ') { event.preventDefault(); selectLibrary('${lib.library}'); }"
       >
         <div class="flex items-center gap-3">
           <i class="fa-solid fa-book w-4 text-center"></i>
