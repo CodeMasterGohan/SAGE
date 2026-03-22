@@ -532,22 +532,26 @@ function renderLibraries(libs) {
     libraryList.innerHTML = libs.map(lib => `
     <li class="group">
       <a 
-        class="library-item flex items-center justify-between px-4 py-2 text-sm text-sage-textMuted hover:text-white rounded-md cursor-pointer ${currentLibrary === lib.library ? 'active' : ''}"
+        role="button"
+        tabindex="0"
+        aria-label="Select library ${lib.library}"
+        onkeydown="if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); selectLibrary('${lib.library}'); }"
+        class="library-item flex items-center justify-between px-4 py-2 text-sm text-sage-textMuted hover:text-white rounded-md cursor-pointer focus-visible:ring-2 focus-visible:ring-sage-accent focus:outline-none ${currentLibrary === lib.library ? 'active' : ''}"
         onclick="selectLibrary('${lib.library}')"
       >
         <div class="flex items-center gap-3">
-          <i class="fa-solid fa-book w-4 text-center"></i>
+          <i class="fa-solid fa-book w-4 text-center" aria-hidden="true"></i>
           <span class="library-name truncate max-w-[140px]">${lib.library}</span>
         </div>
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-600">${lib.versions.length > 0 ? lib.versions[0] : ''}</span>
           <button 
             onclick="event.stopPropagation(); deleteLibrary('${lib.library}')"
-            class="sidebar-delete-btn opacity-0 group-hover:opacity-100 p-1 rounded text-gray-500 hover:text-red-400 transition-all"
+            class="sidebar-delete-btn opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 p-1 rounded text-gray-500 hover:text-red-400 focus-visible:ring-2 focus-visible:ring-sage-accent focus:outline-none transition-all"
             title="Delete library"
-            aria-label="Delete library"
+            aria-label="Delete library ${lib.library}"
           >
-            <i class="fa-solid fa-trash-can text-[10px]"></i>
+            <i class="fa-solid fa-trash-can text-[10px]" aria-hidden="true"></i>
           </button>
         </div>
       </a>
@@ -644,11 +648,15 @@ async function showSuggestions(query) {
         if (suggestions.length > 0) {
             suggestionList.innerHTML = suggestions.map((s, i) => `
         <li 
-          class="suggestion-item flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer ${i === 0 ? 'bg-[#1f2937] border border-cyan-900/30' : ''}"
+          role="button"
+          tabindex="0"
+          aria-label="Search in ${s.library}"
+          onkeydown="if(event.key === 'Enter' || event.key === ' '){ event.preventDefault(); selectLibrary('${s.library}'); performSearch(); }"
+          class="suggestion-item flex items-center justify-between px-4 py-3 rounded-lg cursor-pointer focus-visible:ring-2 focus-visible:ring-sage-accent focus:outline-none ${i === 0 ? 'bg-[#1f2937] border border-cyan-900/30' : ''}"
           onclick="selectLibrary('${s.library}'); performSearch();"
         >
           <div class="flex items-center gap-3">
-            <i class="fa-solid fa-arrow-right ${i === 0 ? 'text-sage-accent' : 'text-gray-600'}"></i>
+            <i class="fa-solid fa-arrow-right ${i === 0 ? 'text-sage-accent' : 'text-gray-600'}" aria-hidden="true"></i>
             <span class="text-sm ${i === 0 ? 'font-medium text-white' : 'text-gray-300'}">
               Search in <span class="${i === 0 ? 'text-cyan-400 font-bold' : ''}">${s.library}</span>
             </span>
